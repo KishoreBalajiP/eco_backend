@@ -1,19 +1,18 @@
-// routes/orders.js
 import express from "express";
 import db from "../db.js";
 import { authMiddleware } from "../middleware/auth.js";
+import { sendOrderEmail } from "../utils/email.js";
 
 const router = express.Router();
 
 /**
- * POST /api/orders
- * Creates a new order from the current user's cart
+ * Create Order Handler
  */
-router.post("/", authMiddleware, async (req, res) => {
+const createOrderHandler = async (req, res) => {
   try {
-    // Get cart items for user
+    // Get cart items
     const cartResult = await db.query(
-      `SELECT ci.id, ci.quantity, p.id AS product_id, p.price
+      `SELECT ci.id, ci.quantity, p.id AS product_id, p.price, p.name
        FROM cart_items ci
        JOIN products p ON ci.product_id = p.id
        WHERE ci.user_id = $1`,
@@ -24,18 +23,17 @@ router.post("/", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "Cart is empty" });
     }
 
-    // Calculate subtotal
+    // Calculate subtotal & total
     const subtotal = cartResult.rows.reduce(
       (sum, item) => sum + Number(item.price) * item.quantity,
       0
     );
-
-    const shipping = 0; // free shipping for now
+    const shipping = 0; // free shipping
     const total = subtotal + shipping;
 
-    // Create order
+    // Insert order
     const orderResult = await db.query(
-      `INSERT INTO orders (user_id, total_amount, status, created_at)
+      `INSERT INTO orders (user_id, total, status, created_at)
        VALUES ($1, $2, $3, NOW())
        RETURNING id`,
       [req.user.id, total, "pending"]
@@ -55,6 +53,19 @@ router.post("/", authMiddleware, async (req, res) => {
     // Clear cart
     await db.query("DELETE FROM cart_items WHERE user_id = $1", [req.user.id]);
 
+    // Send professional order email
+    await sendOrderEmail(req.user.email, {
+      orderId,
+      total,
+      items: cartResult.rows.map(i => ({
+        name: i.name,
+        quantity: i.quantity,
+        price: Number(i.price)
+      })),
+      status: "Pending",
+      paymentMethod: "COD"
+    });
+
     res.json({
       order: { id: orderId, subtotal, shipping, total, status: "pending" },
     });
@@ -62,19 +73,22 @@ router.post("/", authMiddleware, async (req, res) => {
     console.error("Order creation error:", err);
     res.status(500).json({ error: "Server error" });
   }
-});
+};
+
+// Routes
+router.post("/", authMiddleware, createOrderHandler);
+router.post("/create", authMiddleware, createOrderHandler);
 
 /**
- * GET /api/orders
- * Get all orders for the logged-in user
+ * Get all orders for logged-in user
  */
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const ordersResult = await db.query(
       `SELECT o.id, 
-              o.total_amount AS total, 
+              o.total AS total, 
               0 AS shipping,
-              o.total_amount AS subtotal,
+              o.total AS subtotal,
               o.status, 
               o.created_at
        FROM orders o
@@ -91,19 +105,17 @@ router.get("/", authMiddleware, async (req, res) => {
 });
 
 /**
- * GET /api/orders/:id
  * Get order details
  */
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Order
     const orderResult = await db.query(
       `SELECT id, 
-              total_amount AS total, 
+              total AS total, 
               0 AS shipping,
-              total_amount AS subtotal,
+              total AS subtotal,
               status, 
               created_at
        FROM orders
@@ -115,7 +127,6 @@ router.get("/:id", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
 
-    // Items
     const itemsResult = await db.query(
       `SELECT oi.id, oi.quantity, oi.price,
               p.name, p.image_url

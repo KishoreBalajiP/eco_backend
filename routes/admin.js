@@ -49,13 +49,21 @@ router.delete("/products/:id", authMiddleware, isAdmin, async (req, res) => {
 router.get("/orders", authMiddleware, isAdmin, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT o.id, o.user_id, o.total, o.status, o.created_at, u.email 
+      `SELECT o.id, o.user_id, o.total, o.status, o.created_at, u.email
        FROM orders o 
-       JOIN users u ON o.user_id = u.id 
+       JOIN users u ON o.user_id = u.id
        ORDER BY o.created_at DESC`
     );
-    res.json(result.rows);
+
+    // Map email -> user for frontend
+    const orders = result.rows.map((row) => ({
+      ...row,
+      user: row.email, // frontend expects `user`
+    }));
+
+    res.json({ orders }); // wrap in object for frontend
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Failed to fetch orders" });
   }
 });
@@ -63,7 +71,7 @@ router.get("/orders", authMiddleware, isAdmin, async (req, res) => {
 // ✏️ Update order status
 router.patch("/orders/:id/status", authMiddleware, isAdmin, async (req, res) => {
   const { id } = req.params;
-  const { status } = req.body; // pending, shipped, delivered, canceled
+  const { status } = req.body; // pending, shipped, delivered, cancelled
   try {
     const result = await pool.query(
       "UPDATE orders SET status=$1 WHERE id=$2 RETURNING *",
@@ -75,11 +83,11 @@ router.patch("/orders/:id/status", authMiddleware, isAdmin, async (req, res) => 
   }
 });
 
-// 👥 Manage users (optional)
+// 👥 Manage users
 router.get("/users", authMiddleware, isAdmin, async (req, res) => {
   try {
     const result = await pool.query("SELECT id, email, name, role FROM users");
-    res.json(result.rows);
+    res.json({ users: result.rows });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch users" });
   }

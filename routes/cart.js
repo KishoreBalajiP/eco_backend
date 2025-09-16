@@ -17,7 +17,7 @@ function formatCart(rows) {
       id: item.id,
       product_id: item.product_id,
       name: item.name,
-      price, // flatten price
+      price,
       quantity: qty,
       image_url: item.image_url || "",
       stock: item.stock ?? 0,
@@ -52,18 +52,28 @@ router.get("/", authMiddleware, async (req, res) => {
 
 /**
  * POST /api/cart/add
+ * Updates quantity to the value sent from frontend
  */
 router.post("/add", authMiddleware, async (req, res) => {
   const { product_id, quantity = 1 } = req.body;
   try {
-    await db.query(
-      `INSERT INTO cart_items (user_id, product_id, quantity)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (user_id, product_id) DO UPDATE
-       SET quantity = cart_items.quantity + EXCLUDED.quantity`,
-      [req.user.id, product_id, quantity]
-    );
+    if (quantity <= 0) {
+      // Remove item if quantity <= 0
+      await db.query(
+        `DELETE FROM cart_items WHERE user_id = $1 AND product_id = $2`,
+        [req.user.id, product_id]
+      );
+    } else {
+      await db.query(
+        `INSERT INTO cart_items (user_id, product_id, quantity)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (user_id, product_id) DO UPDATE
+         SET quantity = EXCLUDED.quantity`,
+        [req.user.id, product_id, quantity]
+      );
+    }
 
+    // Return updated cart
     const result = await db.query(
       `SELECT ci.id, ci.quantity, p.id as product_id, p.name, p.price, p.image_url, p.stock
        FROM cart_items ci
@@ -76,7 +86,7 @@ router.post("/add", authMiddleware, async (req, res) => {
     const totalAmount = cartItems.reduce((sum, i) => sum + i.subtotal, 0);
     const totalItems = cartItems.reduce((sum, i) => sum + i.quantity, 0);
 
-    res.json({ message: "Added to cart", cart: cartItems, totalItems, totalAmount });
+    res.json({ message: "Cart updated", cart: cartItems, totalItems, totalAmount });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });

@@ -32,7 +32,7 @@ router.post("/create-order", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
 
     const order = orderRes.rows[0];
-    const amount = Math.round(parseFloat(order.total_amount) * 100); // Razorpay expects paise
+    const amount = Math.round(parseFloat(order.total) * 100); // Razorpay expects paise
 
     const options = {
       amount,
