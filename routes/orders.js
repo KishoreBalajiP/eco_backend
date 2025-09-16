@@ -2,90 +2,135 @@
 import express from "express";
 import db from "../db.js";
 import { authMiddleware } from "../middleware/auth.js";
-import { sendOrderEmail } from "../utils/email.js";
 
 const router = express.Router();
 
 /**
- * POST /api/orders/create
- * body: { shipping: { ... }, payment_method: "stripe", currency: "USD" }
- * This endpoint will:
- *  - get cart items
- *  - create order row
- *  - create order_items
- *  - clear cart
- *  - return order id (payment is handled separately in /payments)
+ * POST /api/orders
+ * Creates a new order from the current user's cart
  */
-router.post("/create", authMiddleware, async (req, res) => {
-  const client = await db.pool.connect();
+router.post("/", authMiddleware, async (req, res) => {
   try {
-    await client.query("BEGIN");
-    const cartRes = await client.query(
-      `SELECT ci.product_id, ci.quantity, p.price FROM cart_items ci JOIN products p ON p.id = ci.product_id WHERE ci.user_id = $1`,
+    // Get cart items for user
+    const cartResult = await db.query(
+      `SELECT ci.id, ci.quantity, p.id AS product_id, p.price
+       FROM cart_items ci
+       JOIN products p ON ci.product_id = p.id
+       WHERE ci.user_id = $1`,
       [req.user.id]
     );
-    if (!cartRes.rows.length) {
-      await client.query("ROLLBACK");
+
+    if (cartResult.rows.length === 0) {
       return res.status(400).json({ error: "Cart is empty" });
     }
-    // compute total
-    const total = cartRes.rows.reduce((s, r) => s + parseFloat(r.price) * r.quantity, 0);
 
-    const orderRes = await client.query(
-      "INSERT INTO orders (user_id, total, currency, status) VALUES ($1, $2, $3, $4) RETURNING id",
-      [req.user.id, total.toFixed(2), req.body.currency || "USD", "pending"]
+    // Calculate subtotal
+    const subtotal = cartResult.rows.reduce(
+      (sum, item) => sum + Number(item.price) * item.quantity,
+      0
     );
-    const orderId = orderRes.rows[0].id;
 
-    for (const row of cartRes.rows) {
-      await client.query(
-        "INSERT INTO order_items (order_id, product_id, quantity, price) VALUES ($1, $2, $3, $4)",
-        [orderId, row.product_id, row.quantity, row.price]
+    const shipping = 0; // free shipping for now
+    const total = subtotal + shipping;
+
+    // Create order
+    const orderResult = await db.query(
+      `INSERT INTO orders (user_id, total_amount, status, created_at)
+       VALUES ($1, $2, $3, NOW())
+       RETURNING id`,
+      [req.user.id, total, "pending"]
+    );
+
+    const orderId = orderResult.rows[0].id;
+
+    // Insert order items
+    for (const item of cartResult.rows) {
+      await db.query(
+        `INSERT INTO order_items (order_id, product_id, quantity, price)
+         VALUES ($1, $2, $3, $4)`,
+        [orderId, item.product_id, item.quantity, item.price]
       );
     }
 
-    // clear cart
-    await client.query("DELETE FROM cart_items WHERE user_id = $1", [req.user.id]);
+    // Clear cart
+    await db.query("DELETE FROM cart_items WHERE user_id = $1", [req.user.id]);
 
-    await client.query("COMMIT");
-
-    // send order confirmation email (async, won't block)
-    sendOrderEmail(req.user.email, { orderId, total });
-
-    res.json({ orderId, total });
+    res.json({
+      order: { id: orderId, subtotal, shipping, total, status: "pending" },
+    });
   } catch (err) {
-    await client.query("ROLLBACK");
-    console.error(err);
+    console.error("Order creation error:", err);
     res.status(500).json({ error: "Server error" });
-  } finally {
-    client.release();
+  }
+});
+
+/**
+ * GET /api/orders
+ * Get all orders for the logged-in user
+ */
+router.get("/", authMiddleware, async (req, res) => {
+  try {
+    const ordersResult = await db.query(
+      `SELECT o.id, 
+              o.total_amount AS total, 
+              0 AS shipping,
+              o.total_amount AS subtotal,
+              o.status, 
+              o.created_at
+       FROM orders o
+       WHERE o.user_id = $1
+       ORDER BY o.created_at DESC`,
+      [req.user.id]
+    );
+
+    res.json({ orders: ordersResult.rows });
+  } catch (err) {
+    console.error("Get orders error:", err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
 /**
  * GET /api/orders/:id
+ * Get order details
  */
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
-    const orderRes = await db.query("SELECT * FROM orders WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id]);
-    if (!orderRes.rows.length) return res.status(404).json({ error: "Order not found" });
-    const itemsRes = await db.query("SELECT * FROM order_items WHERE order_id = $1", [req.params.id]);
-    res.json({ order: orderRes.rows[0], items: itemsRes.rows });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
-  }
-});
+    const { id } = req.params;
 
-/**
- * GET /api/orders (list)
- */
-router.get("/", authMiddleware, async (req, res) => {
-  try {
-    const orders = await db.query("SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC", [req.user.id]);
-    res.json({ orders: orders.rows });
+    // Order
+    const orderResult = await db.query(
+      `SELECT id, 
+              total_amount AS total, 
+              0 AS shipping,
+              total_amount AS subtotal,
+              status, 
+              created_at
+       FROM orders
+       WHERE id = $1 AND user_id = $2`,
+      [id, req.user.id]
+    );
+
+    if (orderResult.rows.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    // Items
+    const itemsResult = await db.query(
+      `SELECT oi.id, oi.quantity, oi.price,
+              p.name, p.image_url
+       FROM order_items oi
+       JOIN products p ON p.id = oi.product_id
+       WHERE oi.order_id = $1`,
+      [id]
+    );
+
+    res.json({
+      order: orderResult.rows[0],
+      items: itemsResult.rows,
+    });
   } catch (err) {
-    console.error(err);
+    console.error("Get order error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });

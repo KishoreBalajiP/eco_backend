@@ -19,10 +19,13 @@ router.get("/", async (req, res) => {
         "SELECT * FROM products WHERE name ILIKE $1 OR description ILIKE $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
         [search, limit, offset]
       );
-      return res.json({ products: result.rows });
+  // Convert price to number for each product
+  const products = result.rows.map(p => ({ ...p, price: p.price ? Number(p.price) : 0 }));
+  return res.json({ products });
     } else {
       const result = await db.query("SELECT * FROM products ORDER BY created_at DESC LIMIT $1 OFFSET $2", [limit, offset]);
-      return res.json({ products: result.rows });
+  const products = result.rows.map(p => ({ ...p, price: p.price ? Number(p.price) : 0 }));
+  return res.json({ products });
     }
   } catch (err) {
     console.error(err);
@@ -38,7 +41,9 @@ router.get("/:id", async (req, res) => {
     const { id } = req.params;
     const result = await db.query("SELECT * FROM products WHERE id = $1", [id]);
     if (!result.rows.length) return res.status(404).json({ error: "Product not found" });
-    res.json({ product: result.rows[0] });
+  // Convert price to number
+  const product = { ...result.rows[0], price: result.rows[0].price ? Number(result.rows[0].price) : 0 };
+  res.json({ product });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });

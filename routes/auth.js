@@ -2,13 +2,12 @@
 import express from "express";
 import bcrypt from "bcrypt";
 import db from "../db.js";
-import { generateToken } from "../middleware/auth.js";
+import { generateToken, authMiddleware } from "../middleware/auth.js";
 
 const router = express.Router();
 
 /**
  * POST /api/auth/register
- * body: { email, password, name }
  */
 router.post("/register", async (req, res) => {
   const { email, password, name } = req.body;
@@ -22,7 +21,7 @@ router.post("/register", async (req, res) => {
     );
     const user = result.rows[0];
     const token = generateToken(user);
-    res.json({ user, token });
+    res.json({ success: true, user, token });
   } catch (err) {
     if (err.code === "23505") return res.status(400).json({ error: "Email already exists" });
     console.error(err);
@@ -32,7 +31,6 @@ router.post("/register", async (req, res) => {
 
 /**
  * POST /api/auth/login
- * body: { email, password }
  */
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
@@ -43,9 +41,25 @@ router.post("/login", async (req, res) => {
     if (!user) return res.status(400).json({ error: "Invalid credentials" });
     const ok = await bcrypt.compare(password, user.password);
     if (!ok) return res.status(400).json({ error: "Invalid credentials" });
+    // remove password before returning
     delete user.password;
     const token = generateToken(user);
-    res.json({ user, token });
+    res.json({ success: true, user, token });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+/**
+ * GET /api/auth/me
+ * Returns current user data decoded from JWT
+ */
+router.get("/me", authMiddleware, async (req, res) => {
+  try {
+    const result = await db.query("SELECT id, email, name, role, created_at FROM users WHERE id = $1", [req.user.id]);
+    if (!result.rows.length) return res.status(404).json({ error: "User not found" });
+    res.json({ success: true, user: result.rows[0] });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
