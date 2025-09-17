@@ -1,7 +1,7 @@
 # eco_backend
 
 ## Overview
-This is the backend for an e-commerce grocery/dairy wholesale store. It provides RESTful APIs for user authentication, product management, cart operations, order processing, payments, chatbot integration, and admin controls. The backend is built with Node.js, Express, and PostgreSQL.
+This Node.js backend powers an e-commerce platform, providing RESTful APIs for authentication, admin controls, cart, chatbot, orders, payments, products, and email notifications. Modular middleware and routes handle business logic and secure user interactions.
 
 ## Folder Structure
 ```
