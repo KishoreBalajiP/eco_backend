@@ -11,7 +11,9 @@ const router = express.Router();
  */
 router.post("/register", async (req, res) => {
   const { email, password, name } = req.body;
-  if (!email || !password) return res.status(400).json({ error: "Missing fields" });
+  if (!email || !password) {
+    return res.status(400).json({ message: "Email and password are required." });
+  }
 
   try {
     const hashed = await bcrypt.hash(password, 10);
@@ -32,13 +34,17 @@ router.post("/register", async (req, res) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,   // 👈 always included
+        role: user.role,
       },
     });
   } catch (err) {
-    if (err.code === "23505") return res.status(400).json({ error: "Email already exists" });
+    if (err.code === "23505") {
+      return res
+        .status(400)
+        .json({ message: "This email is already registered. Please sign in." });
+    }
     console.error(err);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ message: "An unexpected server error occurred." });
   }
 });
 
@@ -47,7 +53,11 @@ router.post("/register", async (req, res) => {
  */
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
-  if (!email || !password) return res.status(400).json({ error: "Missing fields" });
+  if (!email || !password) {
+    return res
+      .status(400)
+      .json({ message: "Please enter both email and password." });
+  }
 
   try {
     const result = await db.query(
@@ -55,10 +65,18 @@ router.post("/login", async (req, res) => {
       [email]
     );
     const user = result.rows[0];
-    if (!user) return res.status(400).json({ error: "Invalid credentials" });
+    if (!user) {
+      return res
+        .status(400)
+        .json({ message: "No account found with this email. Please register." });
+    }
 
     const ok = await bcrypt.compare(password, user.password);
-    if (!ok) return res.status(400).json({ error: "Invalid credentials" });
+    if (!ok) {
+      return res
+        .status(400)
+        .json({ message: "Invalid email or password. Please try again." });
+    }
 
     const token = generateToken(user);
 
@@ -69,12 +87,12 @@ router.post("/login", async (req, res) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,   // 👈 always included
+        role: user.role,
       },
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ message: "An unexpected server error occurred." });
   }
 });
 
@@ -87,11 +105,13 @@ router.get("/me", authMiddleware, async (req, res) => {
       "SELECT id, email, name, role, created_at FROM users WHERE id = $1",
       [req.user.id]
     );
-    if (!result.rows.length) return res.status(404).json({ error: "User not found" });
+    if (!result.rows.length) {
+      return res.status(404).json({ message: "User not found." });
+    }
     res.json({ success: true, user: result.rows[0] });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Server error" });
+    res.status(500).json({ message: "An unexpected server error occurred." });
   }
 });
 
