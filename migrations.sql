@@ -49,15 +49,18 @@ CREATE TABLE IF NOT EXISTS order_items (
   price NUMERIC(10,2) NOT NULL
 );
 
--- search_history (optional)
+-- search_history 
 CREATE TABLE IF NOT EXISTS search_history (
   id SERIAL PRIMARY KEY,
   user_id INTEGER REFERENCES users(id),
   query TEXT,
   created_at TIMESTAMP DEFAULT now()
 );
-INSERT INTO products (name, description, price, stock, image_url)
-VALUES
-('Fresh Milk 1L', 'Organic cow milk', 2.50, 100, 'https://via.placeholder.com/150'),
-('Cheddar Cheese 200g', 'Classic cheddar cheese block', 4.99, 50, 'https://via.placeholder.com/150'),
-('Yogurt 500g', 'Natural plain yogurt', 3.25, 70, 'https://via.placeholder.com/150');
+--registered him as a user.
+--Updated admin user role
+UPDATE users
+SET role = 'admin'
+WHERE email = 'kishorebalaji880@gmail.com';
+
+-- Verify user role
+SELECT id, email, role FROM users WHERE email = 'kishorebalaji880@gmail.com';
