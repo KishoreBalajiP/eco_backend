@@ -2,7 +2,7 @@ import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 dotenv.config();
 
-const transporter = nodemailer.createTransport({
+export const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: parseInt(process.env.SMTP_PORT || "587"),
   secure: false,
@@ -16,7 +16,6 @@ export const sendOrderEmail = async (toEmail, { orderId, total, items, status, p
   if (!process.env.SMTP_USER) return;
 
   try {
-    // Generate HTML for items
     const itemsHtml = items.map(item => `
       <tr>
         <td style="padding:5px 10px;">${item.name}</td>

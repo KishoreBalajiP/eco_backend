@@ -14,6 +14,7 @@ import ordersRoutes from "./routes/orders.js";
 import paymentsRoutes from "./routes/payments.js";
 import chatbotRoutes from "./routes/chatbot.js";
 import adminRoutes from "./routes/admin.js";
+import otpAuthRoutes from "./routes/otpAuth.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -35,6 +36,7 @@ app.use("/api/orders", ordersRoutes);
 app.use("/api/payments", paymentsRoutes);
 app.use("/api/chatbot", chatbotRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/auth", otpAuthRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => res.json({ ok: true }));
