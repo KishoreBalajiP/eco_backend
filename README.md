@@ -119,4 +119,40 @@ This Node.js backend powers an e-commerce platform, providing RESTful APIs for a
 
 ---
 
+
+## New Features & Updates (2025)
+
+### 1. OTP-based Password Reset
+- Added `/api/auth/forgot-password` to request password reset OTP
+- `/api/auth/verify-otp` to verify OTP
+- `/api/auth/reset-password` to reset password after OTP verification
+- New table: `password_otps` for OTP storage
+
+### 2. Product Image Upload via S3
+- Admin product creation and update support image upload to AWS S3
+- Uses `multer` for file upload and `aws-sdk` for S3 integration
+
+### 3. User Role Management
+- Admins can update user roles via `/api/admin/users/:id/role`
+
+### 4. Order Confirmation Email
+- Sends professional HTML order confirmation emails using SMTP
+
+### 5. OpenAI-powered Chatbot
+- `/api/chatbot/message` uses OpenAI API for customer support
+
+### 6. Health Check Endpoint
+- `/api/health` returns `{ ok: true }` for server status
+
+### 7. Search History Table
+- New table: `search_history` for tracking user searches
+
+### 8. Improved Cart and Order APIs
+- Cart and order endpoints now return `totalItems` and `totalAmount`
+
+### 9. Environment Variables
+- Uses `.env` for secrets (DB, SMTP, AWS, OpenAI, JWT, etc.)
+
+---
+
 For more details, see each route file in `routes/` and middleware in `middleware/`.
