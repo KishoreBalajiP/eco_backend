@@ -1,3 +1,4 @@
+// routes/admin.js
 import express from "express";
 import pool from "../db.js";
 import { authMiddleware } from "../middleware/auth.js";
@@ -8,12 +9,16 @@ import s3 from "../utils/s3.js";
 const router = express.Router();
 const upload = multer(); // in-memory storage for file uploads
 
+// -------------------- Products --------------------
+
 // Add product with image upload
 router.post("/products", authMiddleware, isAdmin, upload.single("image"), async (req, res) => {
   const { name, description, price, stock } = req.body;
   const file = req.file;
 
   if (!file) return res.status(400).json({ error: "Image file is required" });
+  if (!name || !description || !price || !stock)
+    return res.status(400).json({ error: "All fields are required" });
 
   try {
     // Upload image to S3
@@ -22,16 +27,18 @@ router.post("/products", authMiddleware, isAdmin, upload.single("image"), async 
       Key: `products/${Date.now()}-${file.originalname}`,
       Body: file.buffer,
       ContentType: file.mimetype,
-      ACL: "public-read",
     };
-
     const uploadResult = await s3.upload(params).promise();
     const image_url = uploadResult.Location;
+
+    // Convert price and stock to numbers
+    const numericPrice = Number(price);
+    const numericStock = Number(stock);
 
     // Insert product into DB
     const result = await pool.query(
       "INSERT INTO products (name, description, price, stock, image_url) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-      [name, description, price, stock, image_url]
+      [name, description, numericPrice, numericStock, image_url]
     );
 
     res.json(result.rows[0]);
@@ -47,6 +54,9 @@ router.put("/products/:id", authMiddleware, isAdmin, upload.single("image"), asy
   const { name, description, price, stock } = req.body;
   const file = req.file;
 
+  if (!name || !description || !price || !stock)
+    return res.status(400).json({ error: "All fields are required" });
+
   try {
     let image_url;
 
@@ -57,19 +67,21 @@ router.put("/products/:id", authMiddleware, isAdmin, upload.single("image"), asy
         Key: `products/${Date.now()}-${file.originalname}`,
         Body: file.buffer,
         ContentType: file.mimetype,
-        ACL: "public-read",
       };
       const uploadResult = await s3.upload(params).promise();
       image_url = uploadResult.Location;
     } else {
       // Keep existing image if no new file uploaded
       const existing = await pool.query("SELECT image_url FROM products WHERE id=$1", [id]);
-      image_url = existing.rows[0].image_url;
+      image_url = existing.rows[0]?.image_url || null;
     }
+
+    const numericPrice = Number(price);
+    const numericStock = Number(stock);
 
     const result = await pool.query(
       "UPDATE products SET name=$1, description=$2, price=$3, stock=$4, image_url=$5 WHERE id=$6 RETURNING *",
-      [name, description, price, stock, image_url, id]
+      [name, description, numericPrice, numericStock, image_url, id]
     );
 
     res.json(result.rows[0]);
@@ -86,9 +98,12 @@ router.delete("/products/:id", authMiddleware, isAdmin, async (req, res) => {
     await pool.query("DELETE FROM products WHERE id=$1", [id]);
     res.json({ message: "Product deleted" });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Failed to delete product" });
   }
 });
+
+// -------------------- Orders --------------------
 
 // View all orders
 router.get("/orders", authMiddleware, isAdmin, async (req, res) => {
@@ -112,10 +127,13 @@ router.get("/orders", authMiddleware, isAdmin, async (req, res) => {
   }
 });
 
-//  Update order status
+// Update order status
 router.patch("/orders/:id/status", authMiddleware, isAdmin, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
+
+  if (!status) return res.status(400).json({ error: "Status is required" });
+
   try {
     const result = await pool.query(
       "UPDATE orders SET status=$1 WHERE id=$2 RETURNING *",
@@ -123,23 +141,31 @@ router.patch("/orders/:id/status", authMiddleware, isAdmin, async (req, res) => 
     );
     res.json(result.rows[0]);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Failed to update order status" });
   }
 });
 
-//  Manage users
+// -------------------- Users --------------------
+
+// Get all users
 router.get("/users", authMiddleware, isAdmin, async (req, res) => {
   try {
     const result = await pool.query("SELECT id, email, name, role FROM users");
     res.json({ users: result.rows });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Failed to fetch users" });
   }
 });
 
+// Update user role
 router.patch("/users/:id/role", authMiddleware, isAdmin, async (req, res) => {
   const { id } = req.params;
   const { role } = req.body;
+
+  if (!role) return res.status(400).json({ error: "Role is required" });
+
   try {
     const result = await pool.query(
       "UPDATE users SET role=$1 WHERE id=$2 RETURNING id, email, role",
@@ -147,6 +173,7 @@ router.patch("/users/:id/role", authMiddleware, isAdmin, async (req, res) => {
     );
     res.json(result.rows[0]);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Failed to update user role" });
   }
 });
