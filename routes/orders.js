@@ -5,12 +5,9 @@ import { sendOrderEmail } from "../utils/email.js";
 
 const router = express.Router();
 
-/**
- * Create Order Handler
- */
+// ---------------- CREATE ORDER ----------------
 const createOrderHandler = async (req, res) => {
   try {
-    // Get cart items
     const cartResult = await db.query(
       `SELECT ci.id, ci.quantity, p.id AS product_id, p.price, p.name
        FROM cart_items ci
@@ -19,19 +16,19 @@ const createOrderHandler = async (req, res) => {
       [req.user.id]
     );
 
-    if (cartResult.rows.length === 0) {
-      return res.status(400).json({ error: "Cart is empty" });
-    }
+    if (!cartResult.rows.length) return res.status(400).json({ error: "Cart is empty" });
 
-    // Calculate subtotal & total
-    const subtotal = cartResult.rows.reduce(
-      (sum, item) => sum + Number(item.price) * item.quantity,
-      0
-    );
-    const shipping = 0; // free shipping
+    const itemsForEmail = cartResult.rows.map(i => ({
+      product_id: i.product_id,
+      name: i.name,
+      quantity: Number(i.quantity),
+      price: Number(i.price),
+    }));
+
+    const subtotal = itemsForEmail.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const shipping = 0;
     const total = subtotal + shipping;
 
-    // Insert order
     const orderResult = await db.query(
       `INSERT INTO orders (user_id, total, status, created_at)
        VALUES ($1, $2, $3, NOW())
@@ -41,8 +38,7 @@ const createOrderHandler = async (req, res) => {
 
     const orderId = orderResult.rows[0].id;
 
-    // Insert order items
-    for (const item of cartResult.rows) {
+    for (const item of itemsForEmail) {
       await db.query(
         `INSERT INTO order_items (order_id, product_id, quantity, price)
          VALUES ($1, $2, $3, $4)`,
@@ -50,53 +46,53 @@ const createOrderHandler = async (req, res) => {
       );
     }
 
-    // Clear cart
     await db.query("DELETE FROM cart_items WHERE user_id = $1", [req.user.id]);
 
-    // Send professional order email
+    const userName = req.user.name?.trim() || req.user.email || "Customer";
+    const adminEmail = process.env.ADMIN_EMAIL?.trim();
+
+    // User email
     await sendOrderEmail(req.user.email, {
       orderId,
       total,
-      items: cartResult.rows.map(i => ({
-        name: i.name,
-        quantity: i.quantity,
-        price: Number(i.price)
-      })),
+      items: itemsForEmail,
       status: "Pending",
-      paymentMethod: "COD"
+      paymentMethod: "COD",
+      message: `Dear ${userName}, your order #${String(orderId).padStart(6, "0")} has been successfully placed.`
     });
 
-    res.json({
-      order: { id: orderId, subtotal, shipping, total, status: "pending" },
-    });
+    // Admin email
+    if (adminEmail) {
+      await sendOrderEmail(adminEmail, {
+        orderId,
+        total,
+        items: itemsForEmail,
+        status: "Pending",
+        paymentMethod: "COD",
+        message: `New order placed by ${userName} (${req.user.email}) - Order #${String(orderId).padStart(6, "0")}.`
+      });
+    }
+
+    res.json({ order: { id: orderId, subtotal, shipping, total, status: "pending" } });
   } catch (err) {
     console.error("Order creation error:", err);
     res.status(500).json({ error: "Server error" });
   }
 };
 
-// Routes
 router.post("/", authMiddleware, createOrderHandler);
 router.post("/create", authMiddleware, createOrderHandler);
 
-/**
- * Get all orders for logged-in user
- */
+// ---------------- GET ORDERS ----------------
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const ordersResult = await db.query(
-      `SELECT o.id, 
-              o.total AS total, 
-              0 AS shipping,
-              o.total AS subtotal,
-              o.status, 
-              o.created_at
+      `SELECT o.id, o.total AS total, 0 AS shipping, o.total AS subtotal, o.status, o.created_at
        FROM orders o
        WHERE o.user_id = $1
        ORDER BY o.created_at DESC`,
       [req.user.id]
     );
-
     res.json({ orders: ordersResult.rows });
   } catch (err) {
     console.error("Get orders error:", err);
@@ -104,96 +100,78 @@ router.get("/", authMiddleware, async (req, res) => {
   }
 });
 
-/**
- * Get order details
- */
 router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-
     const orderResult = await db.query(
-      `SELECT id, 
-              total AS total, 
-              0 AS shipping,
-              total AS subtotal,
-              status, 
-              created_at
+      `SELECT id, total AS total, 0 AS shipping, total AS subtotal, status, created_at
        FROM orders
        WHERE id = $1 AND user_id = $2`,
       [id, req.user.id]
     );
-
-    if (orderResult.rows.length === 0) {
-      return res.status(404).json({ error: "Order not found" });
-    }
+    if (!orderResult.rows.length) return res.status(404).json({ error: "Order not found" });
 
     const itemsResult = await db.query(
-      `SELECT oi.id, oi.quantity, oi.price,
-              p.name, p.image_url
+      `SELECT oi.id, oi.quantity, oi.price, p.name, p.image_url
        FROM order_items oi
        JOIN products p ON p.id = oi.product_id
        WHERE oi.order_id = $1`,
       [id]
     );
 
-    res.json({
-      order: orderResult.rows[0],
-      items: itemsResult.rows,
-    });
+    res.json({ order: orderResult.rows[0], items: itemsResult.rows });
   } catch (err) {
     console.error("Get order error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-/**
- * Cancel a pending order by user
- */
+// ---------------- CANCEL ORDER ----------------
 router.patch("/:id/cancel", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Fetch order
     const orderResult = await db.query(
       `SELECT id, status, total FROM orders WHERE id = $1 AND user_id = $2`,
       [id, req.user.id]
     );
-
-    if (orderResult.rows.length === 0) {
-      return res.status(404).json({ error: "Order not found" });
-    }
+    if (!orderResult.rows.length) return res.status(404).json({ error: "Order not found" });
 
     const order = orderResult.rows[0];
+    if (order.status !== "pending") return res.status(400).json({ error: "Only pending orders can be cancelled" });
 
-    if (order.status !== "pending") {
-      return res.status(400).json({ error: "Only pending orders can be cancelled" });
-    }
-
-    // Update order status
     await db.query(`UPDATE orders SET status = 'cancelled' WHERE id = $1`, [id]);
 
-    // Get order items
     const itemsResult = await db.query(
-      `SELECT oi.id, oi.quantity, oi.price, p.name 
-       FROM order_items oi 
-       JOIN products p ON p.id = oi.product_id 
+      `SELECT oi.id, oi.quantity, oi.price, p.name
+       FROM order_items oi
+       JOIN products p ON p.id = oi.product_id
        WHERE oi.order_id = $1`,
       [id]
     );
 
-    // Send email to admin
-    await sendOrderEmail(process.env.ADMIN_EMAIL, {
-      orderId: id,
-      total: order.total,
-      items: itemsResult.rows.map(i => ({
-        name: i.name,
-        quantity: i.quantity,
-        price: Number(i.price)
-      })),
-      status: "Cancelled",
-      paymentMethod: "COD",
-      message: `User ${req.user.email} cancelled order #${id}`
-    });
+    const itemsForEmail = itemsResult.rows.map(i => ({
+      name: i.name,
+      quantity: Number(i.quantity),
+      price: Number(i.price),
+    }));
+
+    const adminEmail = process.env.ADMIN_EMAIL?.trim();
+
+    if (adminEmail) {
+      try {
+        await sendOrderEmail(adminEmail, {
+          orderId: id,
+          total: Number(order.total),
+          items: itemsForEmail,
+          status: "Cancelled",
+          paymentMethod: "COD",
+          message: `User ${req.user.name || req.user.email} has cancelled order #${String(id).padStart(6, "0")}.`
+        });
+      } catch (err) {
+        console.error("Admin email send failed:", err);
+      }
+    }
 
     res.json({ message: "Order cancelled successfully", orderId: id });
   } catch (err) {

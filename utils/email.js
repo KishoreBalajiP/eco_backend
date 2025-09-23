@@ -8,45 +8,50 @@ export const transporter = nodemailer.createTransport({
   secure: false,
   auth: {
     user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
+    pass: process.env.SMTP_PASS,
+  },
 });
 
 /**
- * Sends an order email.
+ * Sends a professional order email.
  * @param {string} toEmail - Recipient email
- * @param {object} param1 - Details
+ * @param {object} param1 - Email details
  * @param {number} param1.orderId
  * @param {number} param1.total
  * @param {Array} param1.items
  * @param {string} param1.status
  * @param {string} [param1.paymentMethod]
- * @param {string} [param1.message] - Optional custom message
+ * @param {string} [param1.message] - Custom message
  */
 export const sendOrderEmail = async (
   toEmail,
   { orderId, total, items, status, paymentMethod, message }
 ) => {
-  if (!process.env.SMTP_USER) return;
+  if (!process.env.SMTP_USER || !toEmail) return;
 
   try {
+    // Ensure total is a number
+    total = Number(total) || 0;
+
     const itemsHtml = items
-      .map(
-        (item) => `
-      <tr>
-        <td style="padding:5px 10px;">${item.name}</td>
-        <td style="padding:5px 10px; text-align:center;">${item.quantity}</td>
-        <td style="padding:5px 10px; text-align:right;">₹${item.price.toFixed(2)}</td>
-      </tr>
-    `
-      )
+      .map(item => {
+        const price = Number(item.price) || 0;
+        const quantity = Number(item.quantity) || 0;
+        return `
+          <tr>
+            <td style="padding:5px 10px;">${item.name}</td>
+            <td style="padding:5px 10px; text-align:center;">${quantity}</td>
+            <td style="padding:5px 10px; text-align:right;">₹${price.toFixed(2)}</td>
+          </tr>
+        `;
+      })
       .join("");
 
     const html = `
       <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:20px; border:1px solid #eee;">
         <h2 style="color:#333;">Order Update</h2>
         <p>${message || "Thank you for your order. We've received it and will process shortly."}</p>
-        
+
         <h3>Order Details</h3>
         <p><strong>Order ID:</strong> ORD-${String(orderId).padStart(6, "0")}</p>
         <p><strong>Status:</strong> ${status}</p>
@@ -73,8 +78,10 @@ export const sendOrderEmail = async (
       from: process.env.FROM_EMAIL,
       to: toEmail,
       subject: `Order Update - ORD-${String(orderId).padStart(6, "0")}`,
-      html
+      html,
     });
+
+    console.log(`Email sent to ${toEmail} for order #${orderId}`);
   } catch (err) {
     console.error("Email send failed", err);
   }
