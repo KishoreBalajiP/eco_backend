@@ -12,28 +12,46 @@ export const transporter = nodemailer.createTransport({
   }
 });
 
-export const sendOrderEmail = async (toEmail, { orderId, total, items, status, paymentMethod }) => {
+/**
+ * Sends an order email.
+ * @param {string} toEmail - Recipient email
+ * @param {object} param1 - Details
+ * @param {number} param1.orderId
+ * @param {number} param1.total
+ * @param {Array} param1.items
+ * @param {string} param1.status
+ * @param {string} [param1.paymentMethod]
+ * @param {string} [param1.message] - Optional custom message
+ */
+export const sendOrderEmail = async (
+  toEmail,
+  { orderId, total, items, status, paymentMethod, message }
+) => {
   if (!process.env.SMTP_USER) return;
 
   try {
-    const itemsHtml = items.map(item => `
+    const itemsHtml = items
+      .map(
+        (item) => `
       <tr>
         <td style="padding:5px 10px;">${item.name}</td>
         <td style="padding:5px 10px; text-align:center;">${item.quantity}</td>
         <td style="padding:5px 10px; text-align:right;">₹${item.price.toFixed(2)}</td>
       </tr>
-    `).join("");
+    `
+      )
+      .join("");
 
     const html = `
       <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:20px; border:1px solid #eee;">
-        <h2 style="color:#333;">Order Confirmed!</h2>
-        <p>Thank you for your order. We've received your order and will process it shortly.</p>
+        <h2 style="color:#333;">Order Update</h2>
+        <p>${message || "Thank you for your order. We've received it and will process shortly."}</p>
         
         <h3>Order Details</h3>
-        <p><strong>Order ID:</strong> ORD-${String(orderId).padStart(6,'0')}</p>
+        <p><strong>Order ID:</strong> ORD-${String(orderId).padStart(6, "0")}</p>
         <p><strong>Status:</strong> ${status}</p>
-        <p><strong>Payment Method:</strong> ${paymentMethod}</p>
-        
+        ${paymentMethod ? `<p><strong>Payment Method:</strong> ${paymentMethod}</p>` : ""}
+
         <table width="100%" style="border-collapse: collapse; margin-top:10px;">
           <thead>
             <tr style="background:#f5f5f5;">
@@ -48,19 +66,15 @@ export const sendOrderEmail = async (toEmail, { orderId, total, items, status, p
         </table>
 
         <p style="text-align:right; font-weight:bold;">Total: ₹${total.toFixed(2)}</p>
-
-        <p>We will update you when your order is shipped.</p>
-        <p>Happy Shopping!</p>
       </div>
     `;
 
     await transporter.sendMail({
       from: process.env.FROM_EMAIL,
       to: toEmail,
-      subject: `Order Confirmation - ORD-${String(orderId).padStart(6,'0')}`,
+      subject: `Order Update - ORD-${String(orderId).padStart(6, "0")}`,
       html
     });
-
   } catch (err) {
     console.error("Email send failed", err);
   }

@@ -146,4 +146,60 @@ router.get("/:id", authMiddleware, async (req, res) => {
   }
 });
 
+/**
+ * Cancel a pending order by user
+ */
+router.patch("/:id/cancel", authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Fetch order
+    const orderResult = await db.query(
+      `SELECT id, status, total FROM orders WHERE id = $1 AND user_id = $2`,
+      [id, req.user.id]
+    );
+
+    if (orderResult.rows.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const order = orderResult.rows[0];
+
+    if (order.status !== "pending") {
+      return res.status(400).json({ error: "Only pending orders can be cancelled" });
+    }
+
+    // Update order status
+    await db.query(`UPDATE orders SET status = 'cancelled' WHERE id = $1`, [id]);
+
+    // Get order items
+    const itemsResult = await db.query(
+      `SELECT oi.id, oi.quantity, oi.price, p.name 
+       FROM order_items oi 
+       JOIN products p ON p.id = oi.product_id 
+       WHERE oi.order_id = $1`,
+      [id]
+    );
+
+    // Send email to admin
+    await sendOrderEmail(process.env.ADMIN_EMAIL, {
+      orderId: id,
+      total: order.total,
+      items: itemsResult.rows.map(i => ({
+        name: i.name,
+        quantity: i.quantity,
+        price: Number(i.price)
+      })),
+      status: "Cancelled",
+      paymentMethod: "COD",
+      message: `User ${req.user.email} cancelled order #${id}`
+    });
+
+    res.json({ message: "Order cancelled successfully", orderId: id });
+  } catch (err) {
+    console.error("Cancel order error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 export default router;
