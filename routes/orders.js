@@ -88,45 +88,47 @@ const createOrderHandler = async (req, res) => {
       );
     }
 
-    // Clear cart
+    // Clear cart immediately
     await db.query("DELETE FROM cart_items WHERE user_id = $1", [req.user.id]);
 
-    const userName = req.user.name?.trim() || req.user.email || "Customer";
-    const adminEmail = process.env.ADMIN_EMAIL?.trim();
-
-    // User email
-    await sendOrderEmail(req.user.email, {
-      orderId,
-      total,
-      items: itemsForEmail,
-      status: "Pending",
-      paymentMethod: "COD",
-      shipping: userShipping,
-      message: `Dear ${userName}, your order #${String(orderId).padStart(
-        6,
-        "0"
-      )} has been successfully placed.`
-    });
-
-    // Admin email
-    if (adminEmail) {
-      await sendOrderEmail(adminEmail, {
-        orderId,
-        total,
-        items: itemsForEmail,
-        status: "Pending",
-        paymentMethod: "COD",
-        shipping: userShipping,
-        message: `New order placed by ${userName} (${req.user.email}) - Order #${String(orderId).padStart(
-          6,
-          "0"
-        )}.`
-      });
-    }
-
+    // Respond immediately to frontend
     res.json({
       order: { id: orderId, subtotal, shipping, total, status: "pending" },
     });
+
+    // Send emails asynchronously
+    (async () => {
+      try {
+        const userName = req.user.name?.trim() || req.user.email || "Customer";
+        const adminEmail = process.env.ADMIN_EMAIL?.trim();
+
+        // User email
+        await sendOrderEmail(req.user.email, {
+          orderId,
+          total,
+          items: itemsForEmail,
+          status: "Pending",
+          paymentMethod: "COD",
+          shipping: userShipping,
+          message: `Dear ${userName}, your order #${String(orderId).padStart(6,"0")} has been successfully placed.`,
+        });
+
+        // Admin email
+        if (adminEmail) {
+          await sendOrderEmail(adminEmail, {
+            orderId,
+            total,
+            items: itemsForEmail,
+            status: "Pending",
+            paymentMethod: "COD",
+            shipping: userShipping,
+            message: `New order placed by ${userName} (${req.user.email}) - Order #${String(orderId).padStart(6,"0")}.`,
+          });
+        }
+      } catch (err) {
+        console.error("Email sending failed:", err);
+      }
+    })();
   } catch (err) {
     console.error("Order creation error:", err);
     res.status(500).json({ error: "Server error" });
