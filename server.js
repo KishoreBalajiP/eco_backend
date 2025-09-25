@@ -1,4 +1,3 @@
-// server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -15,6 +14,7 @@ import paymentsRoutes from "./routes/payments.js";
 import chatbotRoutes from "./routes/chatbot.js";
 import adminRoutes from "./routes/admin.js";
 import otpAuthRoutes from "./routes/otpAuth.js";
+import userRoutes from "./routes/user.js"; // new import
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -37,11 +37,12 @@ app.use("/api/payments", paymentsRoutes);
 app.use("/api/chatbot", chatbotRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/auth", otpAuthRoutes);
+app.use("/api/users", userRoutes); // added
 
 // Health check
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
+  console.log(`Server running on http://localhost:${PORT}`);
 });

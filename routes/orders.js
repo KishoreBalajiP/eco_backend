@@ -8,6 +8,7 @@ const router = express.Router();
 // ---------------- CREATE ORDER ----------------
 const createOrderHandler = async (req, res) => {
   try {
+    // Fetch cart items
     const cartResult = await db.query(
       `SELECT ci.id, ci.quantity, p.id AS product_id, p.price, p.name
        FROM cart_items ci
@@ -16,7 +17,8 @@ const createOrderHandler = async (req, res) => {
       [req.user.id]
     );
 
-    if (!cartResult.rows.length) return res.status(400).json({ error: "Cart is empty" });
+    if (!cartResult.rows.length)
+      return res.status(400).json({ error: "Cart is empty" });
 
     const itemsForEmail = cartResult.rows.map(i => ({
       product_id: i.product_id,
@@ -25,27 +27,68 @@ const createOrderHandler = async (req, res) => {
       price: Number(i.price),
     }));
 
-    const subtotal = itemsForEmail.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const subtotal = itemsForEmail.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0
+    );
     const shipping = 0;
     const total = subtotal + shipping;
 
+    // Fetch user shipping info
+    const userResult = await db.query(
+      `SELECT shipping_name, shipping_mobile, shipping_line1, shipping_line2, shipping_city, shipping_state, shipping_postal_code, shipping_country
+       FROM users WHERE id = $1`,
+      [req.user.id]
+    );
+    const userShipping = userResult.rows[0];
+
+    if (
+      !userShipping.shipping_name ||
+      !userShipping.shipping_mobile ||
+      !userShipping.shipping_line1 ||
+      !userShipping.shipping_city ||
+      !userShipping.shipping_state ||
+      !userShipping.shipping_postal_code ||
+      !userShipping.shipping_country
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Please add your shipping address and mobile before placing an order." });
+    }
+
+    // Insert order with snapshot of shipping info
     const orderResult = await db.query(
-      `INSERT INTO orders (user_id, total, status, created_at)
-       VALUES ($1, $2, $3, NOW())
+      `INSERT INTO orders 
+       (user_id, total, status, shipping_name, shipping_mobile, shipping_line1, shipping_line2, shipping_city, shipping_state, shipping_postal_code, shipping_country, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
        RETURNING id`,
-      [req.user.id, total, "pending"]
+      [
+        req.user.id,
+        total,
+        "pending",
+        userShipping.shipping_name,
+        userShipping.shipping_mobile,
+        userShipping.shipping_line1,
+        userShipping.shipping_line2,
+        userShipping.shipping_city,
+        userShipping.shipping_state,
+        userShipping.shipping_postal_code,
+        userShipping.shipping_country,
+      ]
     );
 
     const orderId = orderResult.rows[0].id;
 
+    // Insert order items
     for (const item of itemsForEmail) {
       await db.query(
         `INSERT INTO order_items (order_id, product_id, quantity, price)
-         VALUES ($1, $2, $3, $4)`,
+         VALUES ($1,$2,$3,$4)`,
         [orderId, item.product_id, item.quantity, item.price]
       );
     }
 
+    // Clear cart
     await db.query("DELETE FROM cart_items WHERE user_id = $1", [req.user.id]);
 
     const userName = req.user.name?.trim() || req.user.email || "Customer";
@@ -58,7 +101,11 @@ const createOrderHandler = async (req, res) => {
       items: itemsForEmail,
       status: "Pending",
       paymentMethod: "COD",
-      message: `Dear ${userName}, your order #${String(orderId).padStart(6, "0")} has been successfully placed.`
+      shipping: userShipping,
+      message: `Dear ${userName}, your order #${String(orderId).padStart(
+        6,
+        "0"
+      )} has been successfully placed.`
     });
 
     // Admin email
@@ -69,11 +116,17 @@ const createOrderHandler = async (req, res) => {
         items: itemsForEmail,
         status: "Pending",
         paymentMethod: "COD",
-        message: `New order placed by ${userName} (${req.user.email}) - Order #${String(orderId).padStart(6, "0")}.`
+        shipping: userShipping,
+        message: `New order placed by ${userName} (${req.user.email}) - Order #${String(orderId).padStart(
+          6,
+          "0"
+        )}.`
       });
     }
 
-    res.json({ order: { id: orderId, subtotal, shipping, total, status: "pending" } });
+    res.json({
+      order: { id: orderId, subtotal, shipping, total, status: "pending" },
+    });
   } catch (err) {
     console.error("Order creation error:", err);
     res.status(500).json({ error: "Server error" });
@@ -87,10 +140,11 @@ router.post("/create", authMiddleware, createOrderHandler);
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const ordersResult = await db.query(
-      `SELECT o.id, o.total AS total, 0 AS shipping, o.total AS subtotal, o.status, o.created_at
-       FROM orders o
-       WHERE o.user_id = $1
-       ORDER BY o.created_at DESC`,
+      `SELECT id, total AS total, status, created_at,
+              shipping_name, shipping_mobile, shipping_line1, shipping_line2, shipping_city, shipping_state, shipping_postal_code, shipping_country
+       FROM orders
+       WHERE user_id = $1
+       ORDER BY created_at DESC`,
       [req.user.id]
     );
     res.json({ orders: ordersResult.rows });
@@ -104,12 +158,14 @@ router.get("/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const orderResult = await db.query(
-      `SELECT id, total AS total, 0 AS shipping, total AS subtotal, status, created_at
+      `SELECT id, total AS total, status, created_at,
+              shipping_name, shipping_mobile, shipping_line1, shipping_line2, shipping_city, shipping_state, shipping_postal_code, shipping_country
        FROM orders
        WHERE id = $1 AND user_id = $2`,
       [id, req.user.id]
     );
-    if (!orderResult.rows.length) return res.status(404).json({ error: "Order not found" });
+    if (!orderResult.rows.length)
+      return res.status(404).json({ error: "Order not found" });
 
     const itemsResult = await db.query(
       `SELECT oi.id, oi.quantity, oi.price, p.name, p.image_url

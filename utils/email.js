@@ -22,15 +22,15 @@ export const transporter = nodemailer.createTransport({
  * @param {string} param1.status
  * @param {string} [param1.paymentMethod]
  * @param {string} [param1.message] - Custom message
+ * @param {object} [param1.shipping] - Shipping info snapshot
  */
 export const sendOrderEmail = async (
   toEmail,
-  { orderId, total, items, status, paymentMethod, message }
+  { orderId, total, items, status, paymentMethod, message, shipping }
 ) => {
   if (!process.env.SMTP_USER || !toEmail) return;
 
   try {
-    // Ensure total is a number
     total = Number(total) || 0;
 
     const itemsHtml = items
@@ -47,6 +47,20 @@ export const sendOrderEmail = async (
       })
       .join("");
 
+    // Shipping HTML if provided
+    const shippingHtml = shipping
+      ? `
+        <h3>Shipping Address</h3>
+        <p>
+          <strong>Name:</strong> ${shipping.shipping_name}<br/>
+          <strong>Mobile:</strong> ${shipping.shipping_mobile}<br/>
+          ${shipping.shipping_line1}${shipping.shipping_line2 ? ", " + shipping.shipping_line2 : ""}<br/>
+          ${shipping.shipping_city}, ${shipping.shipping_state} - ${shipping.shipping_postal_code}<br/>
+          ${shipping.shipping_country}
+        </p>
+      `
+      : "";
+
     const html = `
       <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:20px; border:1px solid #eee;">
         <h2 style="color:#333;">Order Update</h2>
@@ -56,6 +70,7 @@ export const sendOrderEmail = async (
         <p><strong>Order ID:</strong> ORD-${String(orderId).padStart(6, "0")}</p>
         <p><strong>Status:</strong> ${status}</p>
         ${paymentMethod ? `<p><strong>Payment Method:</strong> ${paymentMethod}</p>` : ""}
+        ${shippingHtml}
 
         <table width="100%" style="border-collapse: collapse; margin-top:10px;">
           <thead>

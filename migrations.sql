@@ -73,3 +73,20 @@ CREATE TABLE IF NOT EXISTS password_otps (
   expires_at TIMESTAMP NOT NULL,
   verified BOOLEAN DEFAULT FALSE
 );
+ALTER TABLE users
+ADD COLUMN shipping_name TEXT,
+ADD COLUMN shipping_mobile VARCHAR(20),
+ADD COLUMN shipping_line1 TEXT,
+ADD COLUMN shipping_line2 TEXT,
+ADD COLUMN shipping_city TEXT,
+ADD COLUMN shipping_state TEXT,
+ADD COLUMN shipping_postal_code TEXT,
+ADD COLUMN shipping_country TEXT;
+-- add address
+ALTER TABLE orders
+ADD COLUMN shipping_line1 TEXT,
+ADD COLUMN shipping_line2 TEXT,
+ADD COLUMN shipping_city TEXT,
+ADD COLUMN shipping_state TEXT,
+ADD COLUMN shipping_postal_code TEXT,
+ADD COLUMN shipping_country TEXT;
