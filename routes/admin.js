@@ -109,15 +109,32 @@ router.delete("/products/:id", authMiddleware, isAdmin, async (req, res) => {
 router.get("/orders", authMiddleware, isAdmin, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT o.id, o.user_id, o.total, o.status, o.created_at, u.email
-       FROM orders o 
+      `SELECT o.id, o.user_id, o.total, o.status, o.created_at, 
+              o.shipping_name, o.shipping_mobile, o.shipping_line1, o.shipping_line2, 
+              o.shipping_city, o.shipping_state, o.shipping_postal_code, o.shipping_country,
+              u.email
+       FROM orders o
        JOIN users u ON o.user_id = u.id
        ORDER BY o.created_at DESC`
     );
 
     const orders = result.rows.map((row) => ({
-      ...row,
-      user: row.email, // frontend expects `user`
+      id: row.id,
+      user_id: row.user_id,
+      user: row.email,
+      total: row.total,
+      status: row.status,
+      created_at: row.created_at,
+      shipping: { // CHANGED: added full shipping info
+        shipping_name: row.shipping_name,
+        shipping_mobile: row.shipping_mobile,
+        shipping_line1: row.shipping_line1,
+        shipping_line2: row.shipping_line2,
+        shipping_city: row.shipping_city,
+        shipping_state: row.shipping_state,
+        shipping_postal_code: row.shipping_postal_code,
+        shipping_country: row.shipping_country,
+      },
     }));
 
     res.json({ orders });
@@ -127,22 +144,64 @@ router.get("/orders", authMiddleware, isAdmin, async (req, res) => {
   }
 });
 
-// Update order status
-router.patch("/orders/:id/status", authMiddleware, isAdmin, async (req, res) => {
+// Get single order with items
+router.get("/orders/:id", authMiddleware, isAdmin, async (req, res) => { // CHANGED: new endpoint
   const { id } = req.params;
-  const { status } = req.body;
-
-  if (!status) return res.status(400).json({ error: "Status is required" });
-
   try {
-    const result = await pool.query(
-      "UPDATE orders SET status=$1 WHERE id=$2 RETURNING *",
-      [status, id]
+    // Fetch order
+    const orderResult = await pool.query(
+      `SELECT o.id, o.user_id, o.total, o.status, o.created_at,
+              o.shipping_name, o.shipping_mobile, o.shipping_line1, o.shipping_line2,
+              o.shipping_city, o.shipping_state, o.shipping_postal_code, o.shipping_country,
+              u.email
+       FROM orders o
+       JOIN users u ON o.user_id = u.id
+       WHERE o.id=$1`,
+      [id]
     );
-    res.json(result.rows[0]);
+
+    if (!orderResult.rows.length) return res.status(404).json({ error: "Order not found" });
+
+    const orderRow = orderResult.rows[0];
+
+    // Fetch order items
+    const itemsResult = await pool.query(
+      `SELECT oi.product_id, oi.quantity, oi.price, p.name
+       FROM order_items oi
+       JOIN products p ON oi.product_id = p.id
+       WHERE oi.order_id=$1`,
+      [id]
+    );
+
+    const order = {
+      id: orderRow.id,
+      user_id: orderRow.user_id,
+      user: orderRow.email,
+      total: orderRow.total,
+      status: orderRow.status,
+      created_at: orderRow.created_at,
+      shipping: {
+        shipping_name: orderRow.shipping_name,
+        shipping_mobile: orderRow.shipping_mobile,
+        shipping_line1: orderRow.shipping_line1,
+        shipping_line2: orderRow.shipping_line2,
+        shipping_city: orderRow.shipping_city,
+        shipping_state: orderRow.shipping_state,
+        shipping_postal_code: orderRow.shipping_postal_code,
+        shipping_country: orderRow.shipping_country,
+      },
+      items: itemsResult.rows.map((item) => ({
+        product_id: item.product_id,
+        name: item.name,
+        quantity: item.quantity,
+        price: item.price,
+      })),
+    };
+
+    res.json({ order });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to update order status" });
+    res.status(500).json({ error: "Failed to fetch order details" });
   }
 });
 
