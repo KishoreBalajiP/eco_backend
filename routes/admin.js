@@ -204,6 +204,28 @@ router.get("/orders/:id", authMiddleware, isAdmin, async (req, res) => { // CHAN
     res.status(500).json({ error: "Failed to fetch order details" });
   }
 });
+// Update order status
+router.patch("/orders/:id/status", authMiddleware, isAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status) return res.status(400).json({ error: "Status is required" });
+
+  try {
+    const result = await pool.query(
+      "UPDATE orders SET status=$1 WHERE id=$2 RETURNING *",
+      [status, id]
+    );
+
+    if (!result.rows.length) return res.status(404).json({ error: "Order not found" });
+
+    res.json({ order: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update order status" });
+  }
+});
+
 
 // -------------------- Users --------------------
 
