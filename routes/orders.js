@@ -189,16 +189,23 @@ router.patch("/:id/cancel", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Fetch order for this user
     const orderResult = await db.query(
       `SELECT id, status, total FROM orders WHERE id = $1 AND user_id = $2`,
       [id, req.user.id]
     );
-    if (!orderResult.rows.length) return res.status(404).json({ error: "Order not found" });
+    if (!orderResult.rows.length)
+      return res.status(404).json({ error: "Order not found" });
 
     const order = orderResult.rows[0];
-    if (order.status !== "pending") return res.status(400).json({ error: "Only pending orders can be cancelled" });
+    if (order.status !== "pending")
+      return res.status(400).json({ error: "Only pending orders can be cancelled" });
 
-    await db.query(`UPDATE orders SET status = 'cancelled' WHERE id = $1`, [id]);
+    // **Set cancelled_by = 'user'**
+    await db.query(
+      `UPDATE orders SET status = 'cancelled', cancelled_by = 'user' WHERE id = $1`,
+      [id]
+    );
 
     const itemsResult = await db.query(
       `SELECT oi.id, oi.quantity, oi.price, p.name
@@ -224,7 +231,7 @@ router.patch("/:id/cancel", authMiddleware, async (req, res) => {
           items: itemsForEmail,
           status: "Cancelled",
           paymentMethod: "COD",
-          message: `User ${req.user.name || req.user.email} has cancelled order #${String(id).padStart(6, "0")}.`
+          message: `User ${req.user.name || req.user.email} has cancelled order #${String(id).padStart(6, "0")}.`,
         });
       } catch (err) {
         console.error("Admin email send failed:", err);
@@ -237,5 +244,6 @@ router.patch("/:id/cancel", authMiddleware, async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
+
 
 export default router;

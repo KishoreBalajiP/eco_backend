@@ -109,7 +109,7 @@ router.delete("/products/:id", authMiddleware, isAdmin, async (req, res) => {
 router.get("/orders", authMiddleware, isAdmin, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT o.id, o.user_id, o.total, o.status, o.created_at, 
+      `SELECT o.id, o.user_id, o.total, o.status, o.cancelled_by, o.created_at, 
               o.shipping_name, o.shipping_mobile, o.shipping_line1, o.shipping_line2, 
               o.shipping_city, o.shipping_state, o.shipping_postal_code, o.shipping_country,
               u.email
@@ -124,8 +124,9 @@ router.get("/orders", authMiddleware, isAdmin, async (req, res) => {
       user: row.email,
       total: row.total,
       status: row.status,
+      cancelled_by: row.cancelled_by,
       created_at: row.created_at,
-      shipping: { // CHANGED: added full shipping info
+      shipping: {
         shipping_name: row.shipping_name,
         shipping_mobile: row.shipping_mobile,
         shipping_line1: row.shipping_line1,
@@ -145,12 +146,11 @@ router.get("/orders", authMiddleware, isAdmin, async (req, res) => {
 });
 
 // Get single order with items
-router.get("/orders/:id", authMiddleware, isAdmin, async (req, res) => { // CHANGED: new endpoint
+router.get("/orders/:id", authMiddleware, isAdmin, async (req, res) => {
   const { id } = req.params;
   try {
-    // Fetch order
     const orderResult = await pool.query(
-      `SELECT o.id, o.user_id, o.total, o.status, o.created_at,
+      `SELECT o.id, o.user_id, o.total, o.status, o.cancelled_by, o.created_at,
               o.shipping_name, o.shipping_mobile, o.shipping_line1, o.shipping_line2,
               o.shipping_city, o.shipping_state, o.shipping_postal_code, o.shipping_country,
               u.email
@@ -164,7 +164,6 @@ router.get("/orders/:id", authMiddleware, isAdmin, async (req, res) => { // CHAN
 
     const orderRow = orderResult.rows[0];
 
-    // Fetch order items
     const itemsResult = await pool.query(
       `SELECT oi.product_id, oi.quantity, oi.price, p.name
        FROM order_items oi
@@ -179,6 +178,7 @@ router.get("/orders/:id", authMiddleware, isAdmin, async (req, res) => { // CHAN
       user: orderRow.email,
       total: orderRow.total,
       status: orderRow.status,
+      cancelled_by: orderRow.cancelled_by,
       created_at: orderRow.created_at,
       shipping: {
         shipping_name: orderRow.shipping_name,
@@ -204,6 +204,7 @@ router.get("/orders/:id", authMiddleware, isAdmin, async (req, res) => { // CHAN
     res.status(500).json({ error: "Failed to fetch order details" });
   }
 });
+
 // Update order status
 router.patch("/orders/:id/status", authMiddleware, isAdmin, async (req, res) => {
   const { id } = req.params;
@@ -211,10 +212,15 @@ router.patch("/orders/:id/status", authMiddleware, isAdmin, async (req, res) => 
 
   if (!status) return res.status(400).json({ error: "Status is required" });
 
+  let cancelled_by = null;
+  if (status === 'cancelled') {
+    cancelled_by = 'admin';
+  }
+
   try {
     const result = await pool.query(
-      "UPDATE orders SET status=$1 WHERE id=$2 RETURNING *",
-      [status, id]
+      "UPDATE orders SET status=$1, cancelled_by=$2 WHERE id=$3 RETURNING *",
+      [status, cancelled_by, id]
     );
 
     if (!result.rows.length) return res.status(404).json({ error: "Order not found" });

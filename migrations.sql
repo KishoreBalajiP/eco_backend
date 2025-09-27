@@ -90,3 +90,6 @@ ADD COLUMN shipping_city TEXT,
 ADD COLUMN shipping_state TEXT,
 ADD COLUMN shipping_postal_code TEXT,
 ADD COLUMN shipping_country TEXT;
+
+-- tells who cancelled the order, admin or user
+ALTER TABLE orders ADD COLUMN cancelled_by VARCHAR(10); -- 'user' | 'admin' | NULL
