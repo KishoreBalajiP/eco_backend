@@ -1,7 +1,7 @@
 # eco_backend
 
 ## Overview
-This Node.js backend powers an e-commerce platform, providing RESTful APIs for authentication, admin controls, cart, chatbot, orders, payments, products, and email notifications. Modular middleware and routes handle business logic and secure user interactions.
+This Node.js backend powers an e-commerce platform, providing RESTful APIs for authentication, admin controls, cart, chatbot, orders, payments, products, user shipping management, and email notifications. Modular middleware and routes handle business logic and secure user interactions. The chatbot now uses the Google Gemini API for customer support.
 
 ## Folder Structure
 ```
@@ -21,8 +21,11 @@ This Node.js backend powers an e-commerce platform, providing RESTful APIs for a
 │   ├── orders.js      # Order creation and retrieval
 │   ├── payments.js    # Payment integration (Razorpay)
 │   └── products.js    # Product listing and details
+│   ├── otpAuth.js     # OTP-based password reset endpoints
+│   └── user.js        # User shipping address management
 ├── utils/             # Utility functions
 │   └── email.js       # Order confirmation email sender
+│   └── s3.js          # AWS S3 integration for image uploads
 ```
 
 ## API Endpoints
@@ -83,6 +86,29 @@ This Node.js backend powers an e-commerce platform, providing RESTful APIs for a
   - Send a message to the AI chatbot (auth required).
   - **Request Body:** `{ message, sessionId? }`
   - **Response:** `{ reply }`
+  - Uses Google Gemini API for AI-powered responses.
+### User Shipping
+- **GET /api/users/me/shipping**
+  - Get current user's shipping address (auth required).
+  - **Response:** `{ shipping_name, shipping_mobile, ... }`
+- **PUT /api/users/me/shipping**
+  - Update current user's shipping address (auth required).
+  - **Request Body:** `{ shipping_name, shipping_mobile, ... }`
+  - **Response:** `{ message }`
+
+### OTP-based Password Reset
+- **POST /api/auth/forgot-password**
+  - Request password reset OTP.
+  - **Request Body:** `{ email }`
+  - **Response:** `{ success, message }`
+- **POST /api/auth/verify-otp**
+  - Verify OTP for password reset.
+  - **Request Body:** `{ email, otp }`
+  - **Response:** `{ success, message }`
+- **POST /api/auth/reset-password**
+  - Reset password after OTP verification.
+  - **Request Body:** `{ email, otp, newPassword }`
+  - **Response:** `{ success, message }`
 
 ### Admin (all require admin role)
 - **POST /api/admin/products**
@@ -108,14 +134,15 @@ This Node.js backend powers an e-commerce platform, providing RESTful APIs for a
   - **Response:** `[ ...users ]`
 
 ## Middleware
-- **authMiddleware**: Checks JWT token, attaches user to request.
-- **isAdmin**: Checks if user has admin role.
+- **authMiddleware**: Checks JWT token, attaches user to request. Required for all endpoints except registration, login, and OTP reset.
+- **isAdmin**: Checks if user has admin role. Used for all `/api/admin` endpoints.
 
 ## Utils
 - **sendOrderEmail**: Sends order confirmation emails using SMTP.
+- **s3.js**: Handles AWS S3 integration for product image uploads (admin endpoints).
 
 ## Database
-- PostgreSQL tables for users, products, cart_items, orders, order_items.
+- PostgreSQL tables for users, products, cart_items, orders, order_items, password_otps, search_history.
 
 ---
 
@@ -138,8 +165,8 @@ This Node.js backend powers an e-commerce platform, providing RESTful APIs for a
 ### 4. Order Confirmation Email
 - Sends professional HTML order confirmation emails using SMTP
 
-### 5. OpenAI-powered Chatbot
-- `/api/chatbot/message` uses OpenAI API for customer support
+### 5. Gemini-powered Chatbot
+- `/api/chatbot/message` uses Google Gemini API for customer support
 
 ### 6. Health Check Endpoint
 - `/api/health` returns `{ ok: true }` for server status
@@ -154,5 +181,14 @@ This Node.js backend powers an e-commerce platform, providing RESTful APIs for a
 - Uses `.env` for secrets (DB, SMTP, AWS, OpenAI, JWT, etc.)
 
 ---
+
+---
+
+## Changelog (2025)
+- Switched chatbot to Google Gemini API
+- Added `/api/users` endpoints for shipping address management
+- Improved OTP-based password reset flow
+- Admin product image upload now uses AWS S3
+- All sensitive config/secrets are managed via `.env`
 
 For more details, see each route file in `routes/` and middleware in `middleware/`.

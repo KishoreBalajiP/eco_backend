@@ -93,3 +93,7 @@ ADD COLUMN shipping_country TEXT;
 
 -- tells who cancelled the order, admin or user
 ALTER TABLE orders ADD COLUMN cancelled_by VARCHAR(10); -- 'user' | 'admin' | NULL
+-- set default currency to INR
+ALTER TABLE orders
+ALTER COLUMN currency SET DEFAULT 'INR';
+
