@@ -5,6 +5,7 @@ import { authMiddleware } from "../middleware/auth.js";
 import { isAdmin } from "../middleware/admin.js";
 import multer from "multer";
 import s3 from "../utils/s3.js";
+import { PutObjectCommand } from "@aws-sdk/client-s3";
 
 const router = express.Router();
 const upload = multer(); // in-memory storage for file uploads
@@ -21,15 +22,18 @@ router.post("/products", authMiddleware, isAdmin, upload.single("image"), async 
     return res.status(400).json({ error: "All fields are required" });
 
   try {
-    // Upload image to S3
+    // Upload image to S3 using AWS SDK v3
+    const key = `products/${Date.now()}-${file.originalname}`;
     const params = {
       Bucket: process.env.AWS_BUCKET_NAME,
-      Key: `products/${Date.now()}-${file.originalname}`,
+      Key: key,
       Body: file.buffer,
       ContentType: file.mimetype,
     };
-    const uploadResult = await s3.upload(params).promise();
-    const image_url = uploadResult.Location;
+    const command = new PutObjectCommand(params);
+    await s3.send(command);
+
+    const image_url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 
     // Convert price and stock to numbers
     const numericPrice = Number(price);
@@ -61,15 +65,18 @@ router.put("/products/:id", authMiddleware, isAdmin, upload.single("image"), asy
     let image_url;
 
     if (file) {
-      // Upload new image to S3
+      // Upload new image to S3 using AWS SDK v3
+      const key = `products/${Date.now()}-${file.originalname}`;
       const params = {
         Bucket: process.env.AWS_BUCKET_NAME,
-        Key: `products/${Date.now()}-${file.originalname}`,
+        Key: key,
         Body: file.buffer,
         ContentType: file.mimetype,
       };
-      const uploadResult = await s3.upload(params).promise();
-      image_url = uploadResult.Location;
+      const command = new PutObjectCommand(params);
+      await s3.send(command);
+
+      image_url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
     } else {
       // Keep existing image if no new file uploaded
       const existing = await pool.query("SELECT image_url FROM products WHERE id=$1", [id]);
@@ -231,7 +238,6 @@ router.patch("/orders/:id/status", authMiddleware, isAdmin, async (req, res) => 
     res.status(500).json({ error: "Failed to update order status" });
   }
 });
-
 
 // -------------------- Users --------------------
 

@@ -34,5 +34,5 @@ coverage/
 # Ignore migrations backup
 migrations_backup.sql
 # ignore geminai chatbot API keys
-eco_backend-chatbot.json
+chatbot-service.json
 
