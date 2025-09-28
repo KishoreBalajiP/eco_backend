@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import bodyParser from "body-parser";
-
+import serverless  from "serverless-http";
 // Load environment variables
 dotenv.config();
 
@@ -42,4 +42,4 @@ app.use("/api/users", userRoutes);
 // Health check
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-export default app;
+module.exports.handler = serverless(app);
