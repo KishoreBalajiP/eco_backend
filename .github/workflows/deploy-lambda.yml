@@ -1,40 +1,46 @@
 name: Deploy Node.js Backend to Lambda
 
-# Trigger the workflow on push to main branch
 on:
   push:
     branches:
-      - main  # Change if your default branch is different
+      - main
 
 jobs:
   deploy:
+    name: Deploy to AWS Lambda
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout the repo
+      # 1. Checkout your repo
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # 2. Set up Node.js 20.x
+      # 2. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 20
+          node-version: '20'
 
-      # 3. Install dependencies (including AWS SDK v3)
+      # 3. Install dependencies
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      # 4. Zip the Lambda function (exclude .git, workflow files, .env)
+      # 4. Zip the Lambda function
       - name: Zip Lambda function
-        run: zip -r function.zip . -x "*.git*" "*.github*" "*.env*"
+        run: |
+          zip -r function.zip . -x "*.git*" "*.github*" "*.env*"
 
-      # 5. Deploy to Lambda using GitHub Secrets
-      - name: Deploy to AWS Lambda
-        uses: aws-actions/aws-lambda-deploy@v1
+      # 5. Configure AWS credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}       # region from GitHub Secrets
-          function-name: EcoBackendLambda             # your Lambda function name
-          zip-file: function.zip
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # 6. Deploy to Lambda using AWS CLI
+      - name: Deploy to Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name EcoBackendLambda \
+            --zip-file fileb://function.zip
