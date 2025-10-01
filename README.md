@@ -192,3 +192,4 @@ This Node.js backend powers an e-commerce platform, providing RESTful APIs for a
 - All sensitive config/secrets are managed via `.env`
 
 For more details, see each route file in `routes/` and middleware in `middleware/`.
+ 
