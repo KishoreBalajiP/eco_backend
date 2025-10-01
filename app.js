@@ -14,8 +14,8 @@ const app = express();
 app.use(bodyParser.json());
 app.use(
   cors({
-    origin: "http://localhost:5173", // update if frontend runs elsewhere
-    credentials: true,
+    origin: "*", // update if frontend runs elsewhere
+    credentials: false,
   })
 );
 
