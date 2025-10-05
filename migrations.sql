@@ -97,3 +97,14 @@ ALTER TABLE orders ADD COLUMN cancelled_by VARCHAR(10); -- 'user' | 'admin' | NU
 ALTER TABLE orders
 ALTER COLUMN currency SET DEFAULT 'INR';
 
+-- Add a purpose column to password_otps table
+ALTER TABLE password_otps
+ADD COLUMN purpose TEXT DEFAULT 'password_reset';
+
+-- create indexes for faster queries
+CREATE INDEX IF NOT EXISTS idx_password_otps_expires ON password_otps (expires_at);
+CREATE INDEX IF NOT EXISTS idx_password_otps_otp ON password_otps (otp);
+
+-- delete any expired OTPs (cleanup)
+DELETE FROM password_otps
+WHERE expires_at < NOW() AND verified = FALSE;

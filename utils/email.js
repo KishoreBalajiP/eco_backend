@@ -12,18 +12,45 @@ export const transporter = nodemailer.createTransport({
   },
 });
 
-/**
- * Sends a professional order email.
- * @param {string} toEmail - Recipient email
- * @param {object} param1 - Email details
- * @param {number} param1.orderId
- * @param {number} param1.total
- * @param {Array} param1.items
- * @param {string} param1.status
- * @param {string} [param1.paymentMethod]
- * @param {string} [param1.message] - Custom message
- * @param {object} [param1.shipping] - Shipping info snapshot
- */
+// ----------------- Password Reset OTP -----------------
+export const sendPasswordResetOtp = async (toEmail, otp) => {
+  const html = `
+    <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:20px; border:1px solid #eee;">
+      <h2>Password Reset OTP</h2>
+      <p>Your OTP for resetting your password is:</p>
+      <h1 style="text-align:center; letter-spacing:5px;">${otp}</h1>
+      <p>This OTP will expire in <strong>10 minutes</strong>.</p>
+    </div>
+  `;
+
+  await transporter.sendMail({
+    from: process.env.FROM_EMAIL,
+    to: toEmail,
+    subject: "Your Password Reset OTP",
+    html,
+  });
+};
+
+// ----------------- Registration OTP -----------------
+export const sendRegistrationOtp = async (toEmail, otp) => {
+  const html = `
+    <div style="font-family:sans-serif; max-width:600px; margin:auto; padding:20px; border:1px solid #eee;">
+      <h2>Welcome to Our Platform!</h2>
+      <p>Use the following OTP to verify your email during registration:</p>
+      <h1 style="text-align:center; letter-spacing:5px;">${otp}</h1>
+      <p>This OTP will expire in <strong>10 minutes</strong>.</p>
+    </div>
+  `;
+
+  await transporter.sendMail({
+    from: process.env.FROM_EMAIL,
+    to: toEmail,
+    subject: "Registration OTP Verification",
+    html,
+  });
+};
+
+// ----------------- Order Emails (existing) -----------------
 export const sendOrderEmail = async (
   toEmail,
   { orderId, total, items, status, paymentMethod, message, shipping }
@@ -47,7 +74,6 @@ export const sendOrderEmail = async (
       })
       .join("");
 
-    // Shipping HTML if provided
     const shippingHtml = shipping
       ? `
         <h3>Shipping Address</h3>
