@@ -21,7 +21,7 @@ const serviceAccount = {
   universe_domain: process.env.GCP_UNIVERSE_DOMAIN,
 };
 
-// Create Google Auth client with correct scope
+// Create Google Auth client with generative language scope
 const auth = new GoogleAuth({
   credentials: serviceAccount,
   scopes: ["https://www.googleapis.com/auth/generative-language"],
@@ -34,34 +34,62 @@ async function getAccessToken() {
   return tokenResponse.token;
 }
 
-// Allowed website topics (can customize)
-const WEBSITE_TOPICS = `
-You are a chatbot for MyWebsite.com. You only answer questions related to:
-- Products available on the website
-- Contact information for the store
-- Refunds, returns, and order policies
-- Store location and hours
-Do not answer unrelated questions.
-`;
+// Allowed keywords for website-related responses
+const ALLOWED_KEYWORDS = [
+  "product", "products", "contact", "store", "refund", "return",
+  "order", "policy", "privacy", "legal", "history", "created",
+  "how the store came", "quality", "expired", "date"
+];
+
+// Greetings list
+const GREETINGS = ["hi", "hello", "hey", "good morning", "good evening"];
 
 /**
  * POST /api/chatbot/message
- * Forwards user message to Google Gemini API and returns filtered response.
+ * Handles chatbot messages for website-only queries with free tier
  */
 router.post("/message", authMiddleware, async (req, res) => {
-  const { message } = req.body;
+  const { message, userId } = req.body; // userId from authMiddleware
 
   if (!message) {
     return res.status(400).json({ error: "Message is required" });
   }
 
+  // --- Free tier check (in-memory, reset daily) ---
+  if (!global.userQueries) global.userQueries = {};
+  const today = new Date().toDateString();
+  if (!global.userQueries[userId]) global.userQueries[userId] = {};
+  if (!global.userQueries[userId][today]) global.userQueries[userId][today] = 0;
+
+  if (global.userQueries[userId][today] >= 5) {
+    return res.json({ reply: "Your free tier limit of 5 queries per day is over." });
+  }
+
+  global.userQueries[userId][today] += 1;
+
+  // --- Greeting check ---
+  if (GREETINGS.some(g => message.toLowerCase().includes(g))) {
+    return res.json({ reply: "Hello! I can help you with jayastores products, store info, policies, and more." });
+  }
+
   try {
     const token = await getAccessToken();
-    const model = "gemini-1.5-pro"; // latest stable model
+    const model = "gemini-pro-latest"; // Latest stable model
 
-    // Combine system instruction with user message
+    // System instructions for Gemini
+    const WEBSITE_TOPICS = `
+You are a chatbot for jayastores.com. Only answer questions related to:
+- Products available on the website
+- Product quality (we check dates, no expired items)
+- Contact information for the store
+- Refunds, returns, and order policies
+- Store location and hours
+- Privacy, legal, and store history
+Do not answer unrelated questions.
+`;
+
     const prompt = [
-      { text: WEBSITE_TOPICS }, 
+      { text: WEBSITE_TOPICS },
       { text: message }
     ];
 
@@ -69,24 +97,21 @@ router.post("/message", authMiddleware, async (req, res) => {
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
       {
         contents: [{ parts: prompt }],
-        generationConfig: {
-          maxOutputTokens: 500,
-          temperature: 0.5, // less creative, more factual
-        },
+        generationConfig: { maxOutputTokens: 500, temperature: 0.5 },
       },
       {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         timeout: 10000,
       }
     );
 
+    // --- Filter response based on allowed keywords ---
     let botMessage = "Sorry, I can only answer questions about jayastores.";
 
     if (response.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-      botMessage = response.data.candidates[0].content.parts[0].text;
+      const rawMessage = response.data.candidates[0].content.parts[0].text.toLowerCase();
+      const isAllowed = ALLOWED_KEYWORDS.some(keyword => rawMessage.includes(keyword));
+      if (isAllowed) botMessage = response.data.candidates[0].content.parts[0].text;
     }
 
     res.json({ reply: botMessage, modelUsed: model });
@@ -101,7 +126,7 @@ router.post("/message", authMiddleware, async (req, res) => {
 
 /**
  * GET /api/chatbot/models
- * Lists available models to help debug
+ * Lists available models for debugging
  */
 router.get("/models", authMiddleware, async (req, res) => {
   try {
@@ -110,10 +135,7 @@ router.get("/models", authMiddleware, async (req, res) => {
     const response = await axios.get(
       `https://generativelanguage.googleapis.com/v1beta/models`,
       {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         timeout: 10000,
       }
     );
