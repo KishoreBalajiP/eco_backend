@@ -11,7 +11,7 @@ const serviceAccount = {
   type: "service_account",
   project_id: process.env.GCP_PROJECT_ID,
   private_key_id: process.env.GCP_PRIVATE_KEY_ID,
-  private_key: process.env.GCP_PRIVATE_KEY?.replace(/\\n/g, "\n"), // fix newline issue
+  private_key: process.env.GCP_PRIVATE_KEY?.replace(/\\n/g, "\n"),
   client_email: process.env.GCP_CLIENT_EMAIL,
   client_id: process.env.GCP_CLIENT_ID,
   auth_uri: process.env.GCP_AUTH_URI,
@@ -21,10 +21,10 @@ const serviceAccount = {
   universe_domain: process.env.GCP_UNIVERSE_DOMAIN,
 };
 
-// Create Google Auth client
+// Create Google Auth client with correct scope
 const auth = new GoogleAuth({
   credentials: serviceAccount,
-  scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+  scopes: ["https://www.googleapis.com/auth/generative-language"],
 });
 
 // Helper to get access token
@@ -34,9 +34,19 @@ async function getAccessToken() {
   return tokenResponse.token;
 }
 
+// Allowed website topics (can customize)
+const WEBSITE_TOPICS = `
+You are a chatbot for MyWebsite.com. You only answer questions related to:
+- Products available on the website
+- Contact information for the store
+- Refunds, returns, and order policies
+- Store location and hours
+Do not answer unrelated questions.
+`;
+
 /**
  * POST /api/chatbot/message
- * Forwards the user message to Google Gemini API and returns the response.
+ * Forwards user message to Google Gemini API and returns filtered response.
  */
 router.post("/message", authMiddleware, async (req, res) => {
   const { message } = req.body;
@@ -47,13 +57,22 @@ router.post("/message", authMiddleware, async (req, res) => {
 
   try {
     const token = await getAccessToken();
-    const model = "gemini-1.5-flash-latest";
+    const model = "gemini-1.5-pro"; // latest stable model
+
+    // Combine system instruction with user message
+    const prompt = [
+      { text: WEBSITE_TOPICS }, 
+      { text: message }
+    ];
 
     const response = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
       {
-        contents: [{ parts: [{ text: message }] }],
-        generationConfig: { maxOutputTokens: 500, temperature: 0.7 },
+        contents: [{ parts: prompt }],
+        generationConfig: {
+          maxOutputTokens: 500,
+          temperature: 0.5, // less creative, more factual
+        },
       },
       {
         headers: {
@@ -64,35 +83,19 @@ router.post("/message", authMiddleware, async (req, res) => {
       }
     );
 
-    let botMessage = "Sorry, I couldn't generate a response.";
+    let botMessage = "Sorry, I can only answer questions about jayastores.";
 
     if (response.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
       botMessage = response.data.candidates[0].content.parts[0].text;
     }
 
-    console.log("Bot response generated successfully");
     res.json({ reply: botMessage, modelUsed: model });
   } catch (err) {
-    console.error("Gemini API error:", err.message);
-    if (err.response) {
-      console.error("API response error:", err.response.data);
-      res.status(err.response.status).json({
-        error: "Gemini API error",
-        details: err.response.data.error?.message || "Unknown API error",
-      });
-    } else if (err.request) {
-      console.error("No response received from API");
-      res.status(503).json({
-        error: "Service unavailable",
-        details: "No response from Gemini API",
-      });
-    } else {
-      console.error("Request setup error:", err.message);
-      res.status(500).json({
-        error: "Server error",
-        details: err.message,
-      });
-    }
+    console.error("Gemini API error:", err.response?.data || err.message);
+    res.status(500).json({
+      error: "Failed to generate response",
+      details: err.response?.data?.error?.message || err.message,
+    });
   }
 });
 
