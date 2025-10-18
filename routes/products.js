@@ -8,7 +8,15 @@ const router = express.Router();
  * query: ?q=search&page=1&limit=20
  */
 router.get("/", async (req, res) => {
-  const { q, page = 1, limit = 20 } = req.query;
+  let { q, page = 1, limit = 20 } = req.query;
+
+  // Convert page and limit to numbers
+  page = parseInt(page, 10);
+  limit = parseInt(limit, 10);
+
+  if (isNaN(page) || page < 1) page = 1;
+  if (isNaN(limit) || limit < 1) limit = 20;
+
   const offset = (page - 1) * limit;
 
   try {
@@ -40,7 +48,7 @@ router.get("/", async (req, res) => {
 
     res.json({ products });
   } catch (err) {
-    console.error(err);
+    console.error("Error fetching products:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -68,7 +76,7 @@ router.get("/:id", async (req, res) => {
 
     res.json({ product });
   } catch (err) {
-    console.error(err);
+    console.error("Error fetching product by ID:", err);
     res.status(500).json({ error: "Server error" });
   }
 });

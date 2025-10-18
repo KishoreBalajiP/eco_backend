@@ -131,15 +131,15 @@ router.post("/reset-password", async (req, res) => {
 
 // ------------------- OPTIONAL CRON CLEANUP -------------------
 // Run every hour to delete expired & unverified OTPs
-// cron.schedule("0 * * * *", async () => {
-//   try {
-//     const result = await db.query(
-//       "DELETE FROM password_otps WHERE expires_at < NOW() AND verified = false"
-//     );
-//     console.log(` OTP cleanup done: ${result.rowCount} expired OTPs removed`);
-//   } catch (err) {
-//     console.error("OTP cleanup failed:", err);
-//   }
-// });
+cron.schedule("0 * * * *", async () => {
+  try {
+    const result = await db.query(
+      "DELETE FROM password_otps WHERE expires_at < NOW() AND verified = false"
+    );
+    console.log(` OTP cleanup done: ${result.rowCount} expired OTPs removed`);
+  } catch (err) {
+    console.error("OTP cleanup failed:", err);
+  }
+});
 
-// export default router;
+export default router;
