@@ -7,7 +7,7 @@ const router = express.Router();
 
 // ---------------- CREATE ORDER ----------------
 const createOrderHandler = async (req, res) => {
-  const client = await db.connect();
+  const client = await db.pool.connect(); // Ensure using pool.connect
   try {
     // Start a transaction
     await client.query('BEGIN');
@@ -156,7 +156,7 @@ const createOrderHandler = async (req, res) => {
 
   } catch (err) {
     console.error("Order creation error:", err);
-    await db.query('ROLLBACK');
+    try { await client.query('ROLLBACK'); } catch(e){ console.error(e); }
     res.status(500).json({ error: "Server error" });
   } finally {
     client.release();
