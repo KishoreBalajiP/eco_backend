@@ -7,10 +7,14 @@ const router = express.Router();
 
 // ---------------- CREATE ORDER ----------------
 const createOrderHandler = async (req, res) => {
+  const client = await db.connect();
   try {
+    // Start a transaction
+    await client.query('BEGIN');
+
     // Fetch cart items
-    const cartResult = await db.query(
-      `SELECT ci.id, ci.quantity, p.id AS product_id, p.price, p.name
+    const cartResult = await client.query(
+      `SELECT ci.id, ci.quantity, p.id AS product_id, p.price, p.name, p.stock
        FROM cart_items ci
        JOIN products p ON ci.product_id = p.id
        WHERE ci.user_id = $1`,
@@ -35,8 +39,9 @@ const createOrderHandler = async (req, res) => {
     const total = subtotal + shipping;
 
     // Fetch user shipping info
-    const userResult = await db.query(
-      `SELECT shipping_name, shipping_mobile, shipping_line1, shipping_line2, shipping_city, shipping_state, shipping_postal_code, shipping_country
+    const userResult = await client.query(
+      `SELECT shipping_name, shipping_mobile, shipping_line1, shipping_line2,
+              shipping_city, shipping_state, shipping_postal_code, shipping_country
        FROM users WHERE id = $1`,
       [req.user.id]
     );
@@ -56,10 +61,21 @@ const createOrderHandler = async (req, res) => {
         .json({ error: "Please add your shipping address and mobile before placing an order." });
     }
 
-    // Insert order with snapshot of shipping info
-    const orderResult = await db.query(
+    // Check stock availability before placing the order
+    for (const item of cartResult.rows) {
+      if (item.stock < item.quantity) {
+        await client.query('ROLLBACK');
+        return res
+          .status(400)
+          .json({ error: `Insufficient stock for product: ${item.name}` });
+      }
+    }
+
+    // Insert order
+    const orderResult = await client.query(
       `INSERT INTO orders 
-       (user_id, total, status, shipping_name, shipping_mobile, shipping_line1, shipping_line2, shipping_city, shipping_state, shipping_postal_code, shipping_country, created_at)
+       (user_id, total, status, shipping_name, shipping_mobile, shipping_line1, shipping_line2, 
+        shipping_city, shipping_state, shipping_postal_code, shipping_country, created_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
        RETURNING id`,
       [
@@ -79,17 +95,27 @@ const createOrderHandler = async (req, res) => {
 
     const orderId = orderResult.rows[0].id;
 
-    // Insert order items
+    // Insert order items and update product stock
     for (const item of itemsForEmail) {
-      await db.query(
+      await client.query(
         `INSERT INTO order_items (order_id, product_id, quantity, price)
          VALUES ($1,$2,$3,$4)`,
         [orderId, item.product_id, item.quantity, item.price]
       );
+
+      await client.query(
+        `UPDATE products 
+         SET stock = stock - $1
+         WHERE id = $2`,
+        [item.quantity, item.product_id]
+      );
     }
 
-    // Clear cart immediately
-    await db.query("DELETE FROM cart_items WHERE user_id = $1", [req.user.id]);
+    // Clear cart
+    await client.query("DELETE FROM cart_items WHERE user_id = $1", [req.user.id]);
+
+    // Commit transaction
+    await client.query('COMMIT');
 
     // Respond immediately to frontend
     res.json({
@@ -102,7 +128,6 @@ const createOrderHandler = async (req, res) => {
         const userName = req.user.name?.trim() || req.user.email || "Customer";
         const adminEmail = process.env.ADMIN_EMAIL?.trim();
 
-        // User email
         await sendOrderEmail(req.user.email, {
           orderId,
           total,
@@ -113,7 +138,6 @@ const createOrderHandler = async (req, res) => {
           message: `Dear ${userName}, your order #${String(orderId).padStart(6,"0")} has been successfully placed.`,
         });
 
-        // Admin email
         if (adminEmail) {
           await sendOrderEmail(adminEmail, {
             orderId,
@@ -129,11 +153,16 @@ const createOrderHandler = async (req, res) => {
         console.error("Email sending failed:", err);
       }
     })();
+
   } catch (err) {
     console.error("Order creation error:", err);
+    await db.query('ROLLBACK');
     res.status(500).json({ error: "Server error" });
+  } finally {
+    client.release();
   }
 };
+
 
 router.post("/", authMiddleware, createOrderHandler);
 router.post("/create", authMiddleware, createOrderHandler);
