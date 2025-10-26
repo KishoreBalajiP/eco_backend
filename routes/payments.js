@@ -1,105 +1,103 @@
 // routes/payments.js
 import express from "express";
-import Razorpay from "razorpay";
 import crypto from "crypto";
 import db from "../db.js";
 import { authMiddleware } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// Setup Razorpay
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+// ---------------- CREATE PHONEPE ORDER ----------------
+router.post("/create-phonepe-order", authMiddleware, async (req, res) => {
+  const { orderId, amount } = req.body;
 
-/**
- * POST /api/payments/create-order
- * body: { orderId }
- * Creates a Razorpay order for an existing order in DB
- */
-router.post("/create-order", authMiddleware, async (req, res) => {
-  const { orderId } = req.body;
-  if (!orderId) return res.status(400).json({ error: "orderId required" });
+  if (!orderId || !amount)
+    return res.status(400).json({ error: "orderId and amount required" });
 
   try {
-    // Fetch order
+    // Fetch order from DB to ensure it belongs to user
     const orderRes = await db.query(
       "SELECT * FROM orders WHERE id = $1 AND user_id = $2",
       [orderId, req.user.id]
     );
+
     if (!orderRes.rows.length)
       return res.status(404).json({ error: "Order not found" });
 
-    const order = orderRes.rows[0];
-    const amount = Math.round(parseFloat(order.total) * 100); // Razorpay expects paise
+    const amountPaise = Math.round(parseFloat(amount) * 100); // PhonePe expects paise
 
-    const options = {
-      amount,
-      currency: "INR",
-      receipt: `order_rcptid_${orderId}`,
-      payment_capture: 1,
+    // Create payload for PhonePe Standard Checkout
+    const payload = {
+      merchantId: process.env.PHONEPE_MERCHANT_ID,
+      merchantOrderId: orderId,
+      amount: amountPaise,
+      redirectUrl: "https://yourwebsite.com/payment-callback", // Replace with your callback URL
     };
 
-    const razorpayOrder = await razorpay.orders.create(options);
+    // HMAC SHA256 signature
+    const signature = crypto
+      .createHmac("sha256", process.env.PHONEPE_SECRET_KEY)
+      .update(JSON.stringify(payload))
+      .digest("hex");
 
-    // Save razorpay_order_id in DB
+    // Save phonepe_order_id in DB
     await db.query(
-      "UPDATE orders SET razorpay_order_id = $1 WHERE id = $2",
-      [razorpayOrder.id, orderId]
+      "UPDATE orders SET phonepe_order_id = $1 WHERE id = $2",
+      [orderId, orderId]
     );
 
-    res.json({
-      success: true,
-      order: {
-        id: razorpayOrder.id,
-        amount: razorpayOrder.amount,
-        currency: razorpayOrder.currency,
-      },
-    });
+    // Send HTML form that auto-submits to PhonePe
+    const htmlForm = `
+      <html>
+        <body onload="document.forms[0].submit()">
+          <form action="${payload.redirectUrl}" method="POST">
+            <input type="hidden" name="merchantId" value="${payload.merchantId}" />
+            <input type="hidden" name="paymentId" value="${orderId}" />
+            <input type="hidden" name="amount" value="${amountPaise}" />
+            <input type="hidden" name="signature" value="${signature}" />
+          </form>
+          <p>Redirecting to PhonePe...</p>
+        </body>
+      </html>
+    `;
+
+    res.send(htmlForm);
+
   } catch (err) {
-    console.error("Error creating Razorpay order:", err);
-    res.status(500).json({ error: "Failed to create Razorpay order" });
+    console.error("Error creating PhonePe order:", err);
+    res.status(500).json({ error: "Failed to create PhonePe order" });
   }
 });
 
-/**
- * POST /api/payments/verify
- * body: { orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature }
- * Verifies signature and updates order status
- */
-router.post("/verify", authMiddleware, async (req, res) => {
-  const {
-    orderId,
-    razorpay_order_id,
-    razorpay_payment_id,
-    razorpay_signature,
-  } = req.body;
-
-  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !orderId) {
-    return res.status(400).json({ error: "Missing parameters" });
-  }
-
+// ---------------- PHONEPE WEBHOOK ----------------
+router.post("/phonepe-webhook", async (req, res) => {
   try {
-    const generated_signature = crypto
-      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+    const body = req.body;
+    const signature = req.headers["x-phonepe-signature"];
+
+    // Verify HMAC SHA256 signature
+    const generatedSignature = crypto
+      .createHmac("sha256", process.env.PHONEPE_SECRET_KEY)
+      .update(JSON.stringify(body))
       .digest("hex");
 
-    if (generated_signature !== razorpay_signature) {
-      return res.status(400).json({ error: "Invalid signature" });
+    if (generatedSignature !== signature) {
+      console.warn("Invalid PhonePe signature", { received: signature, expected: generatedSignature });
+      return res.status(400).send("Invalid signature");
     }
 
-    // Update order as paid
+    // Update order status
+    const { merchantOrderId, paymentId, status } = body;
+    const paymentStatus = status === "SUCCESS" ? "paid" : "failed";
+
     await db.query(
-      "UPDATE orders SET status = $1, razorpay_payment_id = $2 WHERE id = $3",
-      ["paid", razorpay_payment_id, orderId]
+      "UPDATE orders SET status = $1, phonepe_payment_id = $2 WHERE id = $3",
+      [paymentStatus, paymentId, merchantOrderId]
     );
 
-    res.json({ success: true, message: "Payment verified and order updated" });
+    res.status(200).send("OK");
   } catch (err) {
-    console.error("Payment verification error:", err);
-    res.status(500).json({ error: "Verification failed" });
+    console.error("PhonePe webhook error:", err);
+    res.status(500).send("Internal server error");
   }
 });
 
