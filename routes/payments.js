@@ -1,4 +1,3 @@
-// routes/payments.js
 import express from "express";
 import crypto from "crypto";
 import db from "../db.js";
@@ -94,7 +93,7 @@ router.post("/phonepe-webhook", async (req, res) => {
       [paymentStatus, paymentId, merchantOrderId]
     );
 
-    // --- Clear cart after successful UPI payment ---
+    // Clear cart after successful UPI payment
     if (paymentStatus === "paid") {
       await db.query(
         "DELETE FROM cart_items WHERE user_id = (SELECT user_id FROM orders WHERE id = $1)",

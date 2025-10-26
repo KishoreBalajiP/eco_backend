@@ -111,8 +111,10 @@ const createOrderHandler = async (req, res) => {
       );
     }
 
-    // Clear cart
-    await client.query("DELETE FROM cart_items WHERE user_id = $1", [req.user.id]);
+    // Clear cart for COD only (UPI handled separately in payments.js)
+    if (req.body.paymentMethod === "cod") {
+      await client.query("DELETE FROM cart_items WHERE user_id = $1", [req.user.id]);
+    }
 
     // Commit transaction
     await client.query('COMMIT');
@@ -133,7 +135,7 @@ const createOrderHandler = async (req, res) => {
           total,
           items: itemsForEmail,
           status: "Pending",
-          paymentMethod: "COD",
+          paymentMethod: req.body.paymentMethod || "COD",
           shipping: userShipping,
           message: `Dear ${userName}, your order #${String(orderId).padStart(6,"0")} has been successfully placed.`,
         });
@@ -144,7 +146,7 @@ const createOrderHandler = async (req, res) => {
             total,
             items: itemsForEmail,
             status: "Pending",
-            paymentMethod: "COD",
+            paymentMethod: req.body.paymentMethod || "COD",
             shipping: userShipping,
             message: `New order placed by ${userName} (${req.user.email}) - Order #${String(orderId).padStart(6,"0")}.`,
           });
@@ -162,7 +164,6 @@ const createOrderHandler = async (req, res) => {
     client.release();
   }
 };
-
 
 router.post("/", authMiddleware, createOrderHandler);
 router.post("/create", authMiddleware, createOrderHandler);
@@ -230,7 +231,7 @@ router.patch("/:id/cancel", authMiddleware, async (req, res) => {
     if (order.status !== "pending")
       return res.status(400).json({ error: "Only pending orders can be cancelled" });
 
-    // **Set cancelled_by = 'user'**
+    // Set cancelled_by = 'user'
     await db.query(
       `UPDATE orders SET status = 'cancelled', cancelled_by = 'user' WHERE id = $1`,
       [id]
@@ -273,6 +274,5 @@ router.patch("/:id/cancel", authMiddleware, async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-
 
 export default router;
