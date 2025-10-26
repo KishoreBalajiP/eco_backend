@@ -30,7 +30,7 @@ router.post("/create-phonepe-order", authMiddleware, async (req, res) => {
       merchantId: process.env.PHONEPE_MERCHANT_ID,
       merchantOrderId: orderId,
       amount: amountPaise,
-      redirectUrl: "https://jayastores.vercel.app/payment-callback",
+      redirectUrl: `https://jayastores.vercel.app/payment-callback?orderId=${orderId}`,
     };
 
     // HMAC SHA256 signature
