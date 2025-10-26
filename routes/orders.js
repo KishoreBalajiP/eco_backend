@@ -7,10 +7,11 @@ const router = express.Router();
 
 // ---------------- CREATE ORDER ----------------
 const createOrderHandler = async (req, res) => {
-  const client = await db.pool.connect(); // Ensure using pool.connect
+  const client = await db.pool.connect();
   try {
-    // Start a transaction
     await client.query('BEGIN');
+
+    const { paymentMethod } = req.body; // 'cod' or 'upi'
 
     // Fetch cart items
     const cartResult = await client.query(
@@ -21,8 +22,10 @@ const createOrderHandler = async (req, res) => {
       [req.user.id]
     );
 
-    if (!cartResult.rows.length)
+    if (!cartResult.rows.length) {
+      await client.query('ROLLBACK');
       return res.status(400).json({ error: "Cart is empty" });
+    }
 
     const itemsForEmail = cartResult.rows.map(i => ({
       product_id: i.product_id,
@@ -31,10 +34,7 @@ const createOrderHandler = async (req, res) => {
       price: Number(i.price),
     }));
 
-    const subtotal = itemsForEmail.reduce(
-      (sum, item) => sum + item.price * item.quantity,
-      0
-    );
+    const subtotal = itemsForEmail.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const shipping = 0;
     const total = subtotal + shipping;
 
@@ -56,27 +56,25 @@ const createOrderHandler = async (req, res) => {
       !userShipping.shipping_postal_code ||
       !userShipping.shipping_country
     ) {
-      return res
-        .status(400)
-        .json({ error: "Please add your shipping address and mobile before placing an order." });
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: "Please add your shipping address and mobile before placing an order." });
     }
 
-    // Check stock availability before placing the order
+    // Check stock availability
     for (const item of cartResult.rows) {
       if (item.stock < item.quantity) {
         await client.query('ROLLBACK');
-        return res
-          .status(400)
-          .json({ error: `Insufficient stock for product: ${item.name}` });
+        return res.status(400).json({ error: `Insufficient stock for product: ${item.name}` });
       }
     }
 
-    // Insert order
+    // Insert order with payment_method (PhonePe fields NULL for now)
     const orderResult = await client.query(
       `INSERT INTO orders 
        (user_id, total, status, shipping_name, shipping_mobile, shipping_line1, shipping_line2, 
-        shipping_city, shipping_state, shipping_postal_code, shipping_country, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
+        shipping_city, shipping_state, shipping_postal_code, shipping_country, created_at, payment_method,
+        phonepe_order_id, phonepe_payment_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),$12,$13,$14)
        RETURNING id`,
       [
         req.user.id,
@@ -90,12 +88,15 @@ const createOrderHandler = async (req, res) => {
         userShipping.shipping_state,
         userShipping.shipping_postal_code,
         userShipping.shipping_country,
+        paymentMethod || "cod",
+        null, // phonepe_order_id
+        null, // phonepe_payment_id
       ]
     );
 
     const orderId = orderResult.rows[0].id;
 
-    // Insert order items and update product stock
+    // Insert order items and update stock
     for (const item of itemsForEmail) {
       await client.query(
         `INSERT INTO order_items (order_id, product_id, quantity, price)
@@ -111,15 +112,14 @@ const createOrderHandler = async (req, res) => {
       );
     }
 
-    // Clear cart for COD only (UPI handled separately in payments.js)
-    if (req.body.paymentMethod === "cod") {
+    // Clear cart only for COD (UPI handled separately)
+    if (paymentMethod === "cod") {
       await client.query("DELETE FROM cart_items WHERE user_id = $1", [req.user.id]);
     }
 
-    // Commit transaction
     await client.query('COMMIT');
 
-    // Respond immediately to frontend
+    // Respond to frontend
     res.json({
       order: { id: orderId, subtotal, shipping, total, status: "pending" },
     });
@@ -135,7 +135,7 @@ const createOrderHandler = async (req, res) => {
           total,
           items: itemsForEmail,
           status: "Pending",
-          paymentMethod: req.body.paymentMethod || "COD",
+          paymentMethod: paymentMethod || "COD",
           shipping: userShipping,
           message: `Dear ${userName}, your order #${String(orderId).padStart(6,"0")} has been successfully placed.`,
         });
@@ -146,7 +146,7 @@ const createOrderHandler = async (req, res) => {
             total,
             items: itemsForEmail,
             status: "Pending",
-            paymentMethod: req.body.paymentMethod || "COD",
+            paymentMethod: paymentMethod || "COD",
             shipping: userShipping,
             message: `New order placed by ${userName} (${req.user.email}) - Order #${String(orderId).padStart(6,"0")}.`,
           });
@@ -173,7 +173,7 @@ router.get("/", authMiddleware, async (req, res) => {
   try {
     const ordersResult = await db.query(
       `SELECT id, total AS total, status, created_at,
-              shipping_name, shipping_mobile, shipping_line1, shipping_line2, shipping_city, shipping_state, shipping_postal_code, shipping_country
+              shipping_name, shipping_mobile, shipping_line1, shipping_line2, shipping_city, shipping_state, shipping_postal_code, shipping_country, payment_method
        FROM orders
        WHERE user_id = $1
        ORDER BY created_at DESC`,
@@ -191,7 +191,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
     const { id } = req.params;
     const orderResult = await db.query(
       `SELECT id, total AS total, status, created_at,
-              shipping_name, shipping_mobile, shipping_line1, shipping_line2, shipping_city, shipping_state, shipping_postal_code, shipping_country
+              shipping_name, shipping_mobile, shipping_line1, shipping_line2, shipping_city, shipping_state, shipping_postal_code, shipping_country, payment_method
        FROM orders
        WHERE id = $1 AND user_id = $2`,
       [id, req.user.id]
@@ -219,7 +219,6 @@ router.patch("/:id/cancel", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Fetch order for this user
     const orderResult = await db.query(
       `SELECT id, status, total FROM orders WHERE id = $1 AND user_id = $2`,
       [id, req.user.id]
@@ -231,7 +230,6 @@ router.patch("/:id/cancel", authMiddleware, async (req, res) => {
     if (order.status !== "pending")
       return res.status(400).json({ error: "Only pending orders can be cancelled" });
 
-    // Set cancelled_by = 'user'
     await db.query(
       `UPDATE orders SET status = 'cancelled', cancelled_by = 'user' WHERE id = $1`,
       [id]

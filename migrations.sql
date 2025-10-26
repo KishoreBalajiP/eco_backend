@@ -108,3 +108,8 @@ CREATE INDEX IF NOT EXISTS idx_password_otps_otp ON password_otps (otp);
 -- delete any expired OTPs (cleanup)
 DELETE FROM password_otps
 WHERE expires_at < NOW() AND verified = FALSE;
+
+ALTER TABLE orders
+ADD COLUMN IF NOT EXISTS phonepe_order_id VARCHAR,
+ADD COLUMN IF NOT EXISTS phonepe_payment_id VARCHAR;
+
