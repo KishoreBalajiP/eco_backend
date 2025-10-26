@@ -49,7 +49,7 @@ router.post("/create-phonepe-order", authMiddleware, async (req, res) => {
     const htmlForm = `
       <html>
         <body onload="document.forms[0].submit()">
-          <form action="${payload.redirectUrl}" method="GET">
+          <form action="${payload.redirectUrl}" method="POST">
             <input type="hidden" name="merchantId" value="${payload.merchantId}" />
             <input type="hidden" name="paymentId" value="${orderId}" />
             <input type="hidden" name="amount" value="${amountPaise}" />
