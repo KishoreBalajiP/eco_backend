@@ -30,7 +30,7 @@ router.post("/create-phonepe-order", authMiddleware, async (req, res) => {
       merchantId: process.env.PHONEPE_MERCHANT_ID,
       merchantOrderId: orderId,
       amount: amountPaise,
-      redirectUrl: "https://jayastores.vercel.app/payment-callback", // <-- updated live frontend URL
+      redirectUrl: "https://jayastores.vercel.app/payment-callback",
     };
 
     // HMAC SHA256 signature
@@ -93,6 +93,14 @@ router.post("/phonepe-webhook", async (req, res) => {
       "UPDATE orders SET status = $1, phonepe_payment_id = $2 WHERE id = $3",
       [paymentStatus, paymentId, merchantOrderId]
     );
+
+    // --- Clear cart after successful UPI payment ---
+    if (paymentStatus === "paid") {
+      await db.query(
+        "DELETE FROM cart_items WHERE user_id = (SELECT user_id FROM orders WHERE id = $1)",
+        [merchantOrderId]
+      );
+    }
 
     res.status(200).send("OK");
   } catch (err) {
