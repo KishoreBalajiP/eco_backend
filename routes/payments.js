@@ -37,7 +37,7 @@ router.post("/create-phonepe-order", authMiddleware, async (req, res) => {
 
     // ✅ Correct PhonePe API base URLs
     const baseUrl = isSandbox
-      ? "https://api-preprod.phonepe.com/apis/pg-sandbox"
+      ? "https://api-preprod.phonepe.com/apis/pgsandbox"
       : "https://api.phonepe.com/apis/hermes";
 
     const merchantId = process.env.PHONEPE_MERCHANT_ID;
