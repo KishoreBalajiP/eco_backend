@@ -12,18 +12,23 @@ const router = express.Router();
  */
 router.post("/create-phonepe-order", authMiddleware, async (req, res) => {
   const { orderId, amount } = req.body;
+  console.log("🔹 Incoming request:", { orderId, amount });
 
   if (!orderId || !amount) {
+    console.log("❌ Missing orderId or amount");
     return res.status(400).json({ error: "orderId and amount required" });
   }
 
   try {
     // 🔹 Ensure the order belongs to the logged-in user
+    console.log("🔹 Verifying order in DB for user:", req.user.id);
     const orderRes = await db.query(
       "SELECT * FROM orders WHERE id = $1 AND user_id = $2",
       [orderId, req.user.id]
     );
+
     if (!orderRes.rows.length) {
+      console.log("❌ Order not found for user:", req.user.id);
       return res.status(404).json({ error: "Order not found" });
     }
 
@@ -39,6 +44,16 @@ router.post("/create-phonepe-order", authMiddleware, async (req, res) => {
     const saltKey = process.env.PHONEPE_SALT_KEY;
     const saltIndex = process.env.PHONEPE_SALT_INDEX || "1";
 
+    // 🔹 Log environment checks
+    console.log("🔹 Env vars check:", {
+      merchantId,
+      saltKeySet: !!saltKey,
+      saltIndex,
+      BACKEND_URL: process.env.BACKEND_URL,
+      FRONTEND_URL: process.env.FRONTEND_URL,
+      isSandbox,
+    });
+
     // ✅ Construct payment payload
     const payload = {
       merchantId,
@@ -47,12 +62,13 @@ router.post("/create-phonepe-order", authMiddleware, async (req, res) => {
       amount: amountPaise,
       redirectUrl: `${process.env.FRONTEND_URL}/payment-callback?orderId=${orderId}`,
       redirectMode: "REDIRECT",
-      // ⚠️ Don't add "/api" again — already in BACKEND_URL
       callbackUrl: `${process.env.BACKEND_URL}/payment/phonepe-webhook`,
       paymentInstrument: {
         type: "PAY_PAGE",
       },
     };
+
+    console.log("🔹 Payload before encoding:", payload);
 
     const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64");
 
@@ -60,6 +76,8 @@ router.post("/create-phonepe-order", authMiddleware, async (req, res) => {
     const stringToSign = `${encodedPayload}/pg/v1/pay${saltKey}`;
     const sha256 = crypto.createHash("sha256").update(stringToSign).digest("hex");
     const xVerify = `${sha256}###${saltIndex}`;
+
+    console.log("🔹 Sending request to PhonePe API:", `${baseUrl}/pg/v1/pay`);
 
     // 🔹 Send request to PhonePe API
     const phonePeRes = await axios.post(
@@ -75,19 +93,23 @@ router.post("/create-phonepe-order", authMiddleware, async (req, res) => {
       }
     );
 
-    const responseData = phonePeRes.data;
-    const redirectUrl = responseData?.data?.instrumentResponse?.redirectInfo?.url;
+    console.log("✅ PhonePe response:", phonePeRes.data);
+
+    const redirectUrl = phonePeRes.data?.data?.instrumentResponse?.redirectInfo?.url;
 
     if (!redirectUrl) {
-      console.error("Invalid PhonePe response:", responseData);
+      console.error("❌ Invalid PhonePe response:", phonePeRes.data);
       return res.status(500).json({ error: "Failed to initiate PhonePe payment" });
     }
 
     // ✅ Return redirect URL to frontend
+    console.log("✅ Payment redirect URL generated:", redirectUrl);
     return res.json({ success: true, redirectUrl });
   } catch (err) {
-    console.error("PhonePe order creation failed:", err.response?.data || err.message);
-    res.status(500).json({ error: "Failed to create PhonePe order" });
+    console.error("❌ PhonePe order creation failed:", err.response?.data || err.message, err.stack);
+    res.status(500).json({
+      error: err.response?.data || err.message || "Failed to create PhonePe order",
+    });
   }
 });
 
@@ -96,8 +118,11 @@ router.post("/create-phonepe-order", authMiddleware, async (req, res) => {
  */
 router.post("/phonepe-webhook", async (req, res) => {
   try {
+    console.log("🔹 Incoming webhook:", JSON.stringify(req.body, null, 2));
+
     const { merchantTransactionId, transactionId, code } = req.body?.data || {};
     const paymentStatus = code === "PAYMENT_SUCCESS" ? "paid" : "failed";
+    console.log("🔹 Payment status:", paymentStatus);
 
     // 🔹 Update order in DB
     await db.query(
@@ -114,6 +139,7 @@ router.post("/phonepe-webhook", async (req, res) => {
       const userId = userRes.rows[0]?.user_id;
 
       if (userId) {
+        console.log("🧹 Clearing cart for user:", userId);
         await db.query("DELETE FROM cart_items WHERE user_id = $1", [userId]);
       }
 
@@ -140,6 +166,7 @@ router.post("/phonepe-webhook", async (req, res) => {
       const adminEmail = process.env.ADMIN_EMAIL?.trim();
 
       if (user?.email) {
+        console.log("📧 Sending order confirmation to:", user.email);
         try {
           await sendOrderEmail(user.email, {
             orderId: merchantTransactionId,
@@ -153,6 +180,7 @@ router.post("/phonepe-webhook", async (req, res) => {
           });
 
           if (adminEmail) {
+            console.log("📧 Sending admin notification to:", adminEmail);
             await sendOrderEmail(adminEmail, {
               orderId: merchantTransactionId,
               total: items.reduce((sum, i) => sum + i.price * i.quantity, 0),
@@ -165,14 +193,14 @@ router.post("/phonepe-webhook", async (req, res) => {
             });
           }
         } catch (e) {
-          console.error("Email sending failed:", e);
+          console.error("❌ Email sending failed:", e);
         }
       }
     }
 
     res.status(200).send("OK");
   } catch (err) {
-    console.error("PhonePe webhook error:", err);
+    console.error("❌ PhonePe webhook error:", err);
     res.status(500).send("Internal Server Error");
   }
 });
