@@ -12,6 +12,7 @@ const createOrderHandler = async (req, res) => {
     await client.query('BEGIN');
 
     const { paymentMethod } = req.body; // 'cod' or 'upi'
+    const method = paymentMethod?.toLowerCase() === "upi" ? "upi" : "cod";
 
     // Fetch cart items
     const cartResult = await client.query(
@@ -68,7 +69,7 @@ const createOrderHandler = async (req, res) => {
       }
     }
 
-    // Insert order with payment_method (PhonePe fields NULL for now)
+    // Insert order with payment_method
     const orderResult = await client.query(
       `INSERT INTO orders 
        (user_id, total, status, shipping_name, shipping_mobile, shipping_line1, shipping_line2, 
@@ -88,7 +89,7 @@ const createOrderHandler = async (req, res) => {
         userShipping.shipping_state,
         userShipping.shipping_postal_code,
         userShipping.shipping_country,
-        paymentMethod || "cod",
+        method,
         null, // phonepe_order_id
         null, // phonepe_payment_id
       ]
@@ -112,8 +113,8 @@ const createOrderHandler = async (req, res) => {
       );
     }
 
-    // Clear cart only for COD (UPI handled separately)
-    if (paymentMethod === "cod") {
+    // Clear cart only for COD
+    if (method === "cod") {
       await client.query("DELETE FROM cart_items WHERE user_id = $1", [req.user.id]);
     }
 
@@ -121,7 +122,7 @@ const createOrderHandler = async (req, res) => {
 
     // Respond to frontend
     res.json({
-      order: { id: orderId, subtotal, shipping, total, status: "pending" },
+      order: { id: orderId, subtotal, shipping, total, status: "pending", paymentMethod: method },
     });
 
     // Send emails asynchronously
@@ -135,7 +136,7 @@ const createOrderHandler = async (req, res) => {
           total,
           items: itemsForEmail,
           status: "Pending",
-          paymentMethod: paymentMethod || "COD",
+          paymentMethod: method,
           shipping: userShipping,
           message: `Dear ${userName}, your order #${String(orderId).padStart(6,"0")} has been successfully placed.`,
         });
@@ -146,7 +147,7 @@ const createOrderHandler = async (req, res) => {
             total,
             items: itemsForEmail,
             status: "Pending",
-            paymentMethod: paymentMethod || "COD",
+            paymentMethod: method,
             shipping: userShipping,
             message: `New order placed by ${userName} (${req.user.email}) - Order #${String(orderId).padStart(6,"0")}.`,
           });
