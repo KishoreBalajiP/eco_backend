@@ -1,12 +1,15 @@
 import express from "express";
 import crypto from "crypto";
+import axios from "axios";
 import db from "../db.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { sendOrderEmail } from "../utils/email.js";
 
 const router = express.Router();
 
-// ---------------- CREATE PHONEPE ORDER ----------------
+/**
+ * ✅ CREATE PHONEPE ORDER (Frontend calls this when user chooses UPI)
+ */
 router.post("/create-phonepe-order", authMiddleware, async (req, res) => {
   const { orderId, amount } = req.body;
 
@@ -15,97 +18,98 @@ router.post("/create-phonepe-order", authMiddleware, async (req, res) => {
   }
 
   try {
-    // Fetch order to ensure it belongs to user
+    // 🔹 Ensure the order belongs to the logged-in user
     const orderRes = await db.query(
       "SELECT * FROM orders WHERE id = $1 AND user_id = $2",
       [orderId, req.user.id]
     );
-
     if (!orderRes.rows.length) {
       return res.status(404).json({ error: "Order not found" });
     }
 
     const amountPaise = Math.round(parseFloat(amount) * 100);
+    const isSandbox = process.env.PHONEPE_SANDBOX === "true";
 
-    // PhonePe sandbox/production URL
-    const phonepeUrl = process.env.PHONEPE_SANDBOX === "true"
-      ? "https://sandbox-accept.money.phonepe.com/v3/standard/checkout"
-      : "https://accept.money.phonepe.com/v3/standard/checkout";
+    // ✅ Correct PhonePe API base URLs
+    const baseUrl = isSandbox
+      ? "https://api-preprod.phonepe.com/apis/pg-sandbox"
+      : "https://api.phonepe.com/apis/hermes";
 
-    // Create payload for PhonePe Standard Checkout
+    const merchantId = process.env.PHONEPE_MERCHANT_ID;
+    const saltKey = process.env.PHONEPE_SALT_KEY;
+    const saltIndex = process.env.PHONEPE_SALT_INDEX || "1";
+
+    // ✅ Construct payment payload
     const payload = {
-      merchantId: process.env.PHONEPE_MERCHANT_ID,
-      merchantOrderId: orderId,
+      merchantId,
+      merchantTransactionId: orderId.toString(),
+      merchantUserId: req.user.id.toString(),
       amount: amountPaise,
       redirectUrl: `${process.env.FRONTEND_URL}/payment-callback?orderId=${orderId}`,
+      redirectMode: "REDIRECT",
+      // ⚠️ Don't add "/api" again — already in BACKEND_URL
+      callbackUrl: `${process.env.BACKEND_URL}/payment/phonepe-webhook`,
+      paymentInstrument: {
+        type: "PAY_PAGE",
+      },
     };
 
-    // Generate HMAC SHA256 signature
-    const signature = crypto
-      .createHmac("sha256", process.env.PHONEPE_SECRET_KEY)
-      .update(JSON.stringify(payload))
-      .digest("hex");
+    const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64");
 
-    // Save phonepe_order_id in DB (optional)
-    await db.query(
-      "UPDATE orders SET phonepe_order_id = $1 WHERE id = $2",
-      [orderId, orderId]
+    // 🔹 Generate checksum header
+    const stringToSign = `${encodedPayload}/pg/v1/pay${saltKey}`;
+    const sha256 = crypto.createHash("sha256").update(stringToSign).digest("hex");
+    const xVerify = `${sha256}###${saltIndex}`;
+
+    // 🔹 Send request to PhonePe API
+    const phonePeRes = await axios.post(
+      `${baseUrl}/pg/v1/pay`,
+      { request: encodedPayload },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "X-VERIFY": xVerify,
+          "X-MERCHANT-ID": merchantId,
+          accept: "application/json",
+        },
+      }
     );
 
-    // Send HTML form to redirect automatically to PhonePe
-    const htmlForm = `
-      <html>
-        <body onload="document.forms[0].submit()">
-          <form action="${phonepeUrl}" method="POST">
-            <input type="hidden" name="merchantId" value="${payload.merchantId}" />
-            <input type="hidden" name="merchantOrderId" value="${payload.merchantOrderId}" />
-            <input type="hidden" name="amount" value="${payload.amount}" />
-            <input type="hidden" name="redirectUrl" value="${payload.redirectUrl}" />
-            <input type="hidden" name="signature" value="${signature}" />
-          </form>
-          <p>Redirecting to PhonePe...</p>
-        </body>
-      </html>
-    `;
+    const responseData = phonePeRes.data;
+    const redirectUrl = responseData?.data?.instrumentResponse?.redirectInfo?.url;
 
-    res.send(htmlForm);
+    if (!redirectUrl) {
+      console.error("Invalid PhonePe response:", responseData);
+      return res.status(500).json({ error: "Failed to initiate PhonePe payment" });
+    }
+
+    // ✅ Return redirect URL to frontend
+    return res.json({ success: true, redirectUrl });
   } catch (err) {
-    console.error("Error creating PhonePe order:", err);
+    console.error("PhonePe order creation failed:", err.response?.data || err.message);
     res.status(500).json({ error: "Failed to create PhonePe order" });
   }
 });
 
-// ---------------- PHONEPE WEBHOOK ----------------
+/**
+ * ✅ PHONEPE CALLBACK / WEBHOOK
+ */
 router.post("/phonepe-webhook", async (req, res) => {
   try {
-    const body = req.body;
-    const signature = req.headers["x-phonepe-signature"];
+    const { merchantTransactionId, transactionId, code } = req.body?.data || {};
+    const paymentStatus = code === "PAYMENT_SUCCESS" ? "paid" : "failed";
 
-    // Verify HMAC SHA256 signature
-    const generatedSignature = crypto
-      .createHmac("sha256", process.env.PHONEPE_SECRET_KEY)
-      .update(JSON.stringify(body))
-      .digest("hex");
-
-    if (generatedSignature !== signature) {
-      console.warn("Invalid PhonePe signature", { received: signature, expected: generatedSignature });
-      return res.status(400).send("Invalid signature");
-    }
-
-    const { merchantOrderId, paymentId, status } = body;
-    const paymentStatus = status === "SUCCESS" ? "paid" : "failed";
-
-    // Update order status in DB
+    // 🔹 Update order in DB
     await db.query(
       "UPDATE orders SET status = $1, phonepe_payment_id = $2 WHERE id = $3",
-      [paymentStatus, paymentId, merchantOrderId]
+      [paymentStatus, transactionId, merchantTransactionId]
     );
 
+    // 🔹 If payment successful → send emails & clear cart
     if (paymentStatus === "paid") {
-      // Clear cart for the user
       const userRes = await db.query(
         "SELECT user_id FROM orders WHERE id = $1",
-        [merchantOrderId]
+        [merchantTransactionId]
       );
       const userId = userRes.rows[0]?.user_id;
 
@@ -113,23 +117,21 @@ router.post("/phonepe-webhook", async (req, res) => {
         await db.query("DELETE FROM cart_items WHERE user_id = $1", [userId]);
       }
 
-      // Fetch order items for email
       const orderItemsRes = await db.query(
         `SELECT oi.product_id, oi.quantity, oi.price, p.name
          FROM order_items oi
          JOIN products p ON p.id = oi.product_id
          WHERE oi.order_id = $1`,
-        [merchantOrderId]
+        [merchantTransactionId]
       );
 
-      const itemsForEmail = orderItemsRes.rows.map(i => ({
+      const items = orderItemsRes.rows.map((i) => ({
         product_id: i.product_id,
         name: i.name,
         quantity: i.quantity,
         price: i.price,
       }));
 
-      // Fetch user email
       const userEmailRes = await db.query(
         "SELECT email, name FROM users WHERE id = $1",
         [userId]
@@ -140,27 +142,30 @@ router.post("/phonepe-webhook", async (req, res) => {
       if (user?.email) {
         try {
           await sendOrderEmail(user.email, {
-            orderId: merchantOrderId,
-            total: itemsForEmail.reduce((sum, i) => sum + i.price * i.quantity, 0),
-            items: itemsForEmail,
+            orderId: merchantTransactionId,
+            total: items.reduce((sum, i) => sum + i.price * i.quantity, 0),
+            items,
             status: "Paid",
-            paymentMethod: "UPI",
-            shipping: {}, // optionally fetch shipping info if needed
-            message: `Dear ${user.name || "Customer"}, your order #${String(merchantOrderId).padStart(6,"0")} has been successfully paid.`,
+            paymentMethod: "UPI (PhonePe)",
+            message: `Dear ${user.name || "Customer"}, your order #${String(
+              merchantTransactionId
+            ).padStart(6, "0")} has been successfully paid.`,
           });
 
           if (adminEmail) {
             await sendOrderEmail(adminEmail, {
-              orderId: merchantOrderId,
-              total: itemsForEmail.reduce((sum, i) => sum + i.price * i.quantity, 0),
-              items: itemsForEmail,
+              orderId: merchantTransactionId,
+              total: items.reduce((sum, i) => sum + i.price * i.quantity, 0),
+              items,
               status: "Paid",
-              paymentMethod: "UPI",
-              message: `New order paid by ${user.name || user.email} - Order #${String(merchantOrderId).padStart(6,"0")}.`,
+              paymentMethod: "UPI (PhonePe)",
+              message: `New order paid by ${user.name || user.email} - Order #${String(
+                merchantTransactionId
+              ).padStart(6, "0")}.`,
             });
           }
-        } catch (err) {
-          console.error("Email sending failed:", err);
+        } catch (e) {
+          console.error("Email sending failed:", e);
         }
       }
     }
@@ -168,7 +173,7 @@ router.post("/phonepe-webhook", async (req, res) => {
     res.status(200).send("OK");
   } catch (err) {
     console.error("PhonePe webhook error:", err);
-    res.status(500).send("Internal server error");
+    res.status(500).send("Internal Server Error");
   }
 });
 
