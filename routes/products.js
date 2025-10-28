@@ -5,19 +5,10 @@ const router = express.Router();
 
 /**
  * GET /api/products
- * query: ?q=search&page=1&limit=20
+ * query: ?q=search
  */
 router.get("/", async (req, res) => {
-  let { q, page = 1, limit = 500 } = req.query;
-
-  // Convert page and limit to numbers
-  page = parseInt(page, 10);
-  limit = parseInt(limit, 10);
-
-  if (isNaN(page) || page < 1) page = 1;
-  if (isNaN(limit) || limit < 1) limit = 500;
-
-  const offset = (page - 1) * limit;
+  let { q } = req.query;
 
   try {
     let result;
@@ -25,13 +16,12 @@ router.get("/", async (req, res) => {
     if (q) {
       const search = `%${q}%`;
       result = await db.query(
-        "SELECT * FROM products WHERE name ILIKE $1 OR description ILIKE $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-        [search, limit, offset]
+        "SELECT * FROM products WHERE name ILIKE $1 OR description ILIKE $1 ORDER BY created_at DESC",
+        [search]
       );
     } else {
       result = await db.query(
-        "SELECT * FROM products ORDER BY created_at DESC LIMIT $1 OFFSET $2",
-        [limit, offset]
+        "SELECT * FROM products ORDER BY created_at DESC"
       );
     }
 
