@@ -15,7 +15,7 @@ router.get("/", async (req, res) => {
   limit = parseInt(limit, 10);
 
   if (isNaN(page) || page < 1) page = 1;
-  if (isNaN(limit) || limit < 1) limit = 20;
+  if (isNaN(limit) || limit < 1) limit = 500;
 
   const offset = (page - 1) * limit;
 
