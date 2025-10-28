@@ -8,7 +8,7 @@ const router = express.Router();
  * query: ?q=search&page=1&limit=20
  */
 router.get("/", async (req, res) => {
-  let { q, page = 1, limit = 20 } = req.query;
+  let { q, page = 1, limit = 500 } = req.query;
 
   // Convert page and limit to numbers
   page = parseInt(page, 10);
