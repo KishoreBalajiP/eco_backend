@@ -25,7 +25,7 @@ router.post("/products", authMiddleware, isAdmin, upload.single("image"), async 
     // Upload image to S3 using AWS SDK v3
     const key = `products/${Date.now()}-${file.originalname}`;
     const params = {
-      Bucket: process.env.AWS_BUCKET_NAME,
+      Bucket: process.env.MY_AWS_BUCKET_NAME,
       Key: key,
       Body: file.buffer,
       ContentType: file.mimetype,
@@ -33,7 +33,7 @@ router.post("/products", authMiddleware, isAdmin, upload.single("image"), async 
     const command = new PutObjectCommand(params);
     await s3.send(command);
 
-    const image_url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
+    const image_url = `https://${process.env.MY_AWS_BUCKET_NAME}.s3.${process.env.MY_AWS_REGION}.amazonaws.com/${key}`;
 
     // Convert price and stock to numbers
     const numericPrice = Number(price);
@@ -68,7 +68,7 @@ router.put("/products/:id", authMiddleware, isAdmin, upload.single("image"), asy
       // Upload new image to S3 using AWS SDK v3
       const key = `products/${Date.now()}-${file.originalname}`;
       const params = {
-        Bucket: process.env.AWS_BUCKET_NAME,
+        Bucket: process.env.MY_AWS_BUCKET_NAME,
         Key: key,
         Body: file.buffer,
         ContentType: file.mimetype,
@@ -76,7 +76,7 @@ router.put("/products/:id", authMiddleware, isAdmin, upload.single("image"), asy
       const command = new PutObjectCommand(params);
       await s3.send(command);
 
-      image_url = `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
+      image_url = `https://${process.env.MY_AWS_BUCKET_NAME}.s3.${process.env.MY_AWS_REGION}.amazonaws.com/${key}`;
     } else {
       // Keep existing image if no new file uploaded
       const existing = await pool.query("SELECT image_url FROM products WHERE id=$1", [id]);
