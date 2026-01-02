@@ -100,8 +100,9 @@ IMPORTANT NOTES:
  * POST /api/chatbot/message
  * Handles chatbot messages for Jayastores website queries
  */
-router.post("/message", authMiddleware, async (req, res) => {
-  const { message, userId } = req.body;
+router.post("/message", async (req, res) => {
+  const { message } = req.body;
+    const userId = req.user?.id || req.ip;
 
   if (!message) {
     return res.status(400).json({ error: "Message is required" });
